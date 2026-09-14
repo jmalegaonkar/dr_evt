@@ -168,6 +168,37 @@ PYBIND11_MODULE(dr_evt, m) {
                     "list[ResourceRelease]: Future resource-release events in "
                     "time order.");
 
+  py::class_<Simulation::Job_Timing>(m, "JobTiming")
+      .def_readonly("job_idx", &Simulation::Job_Timing::job_idx,
+                    "int: Permanent job identifier.")
+      .def_readonly("submit_time", &Simulation::Job_Timing::submit_time,
+                    "float: Submission time, or -1 when invalid.")
+      .def_readonly("begin_time", &Simulation::Job_Timing::begin_time,
+                    "float: Projected start time, or -1 until the job starts.")
+      .def_readonly("end_time", &Simulation::Job_Timing::end_time,
+                    "float: Projected end time, or -1 until the job starts.")
+      .def_readonly("limit_time", &Simulation::Job_Timing::limit_time,
+                    "int: Requested wall-time limit in seconds.")
+      .def_readonly("actual_run_time",
+                    &Simulation::Job_Timing::actual_run_time,
+                    "float: Actual or scheduled run duration.")
+      .def_readonly("num_nodes", &Simulation::Job_Timing::num_nodes,
+                    "int: Requested node count.")
+      .def_readonly("scheduled", &Simulation::Job_Timing::scheduled,
+                    "bool: Whether the job has scheduled timing.")
+      .def("__repr__", [](const Simulation::Job_Timing &timing) {
+        return "JobTiming(job_idx=" + std::to_string(timing.job_idx) +
+               ", submit_time=" + std::to_string(timing.submit_time) +
+               ", begin_time=" + std::to_string(timing.begin_time) +
+               ", end_time=" + std::to_string(timing.end_time) +
+               ", limit_time=" + std::to_string(timing.limit_time) +
+               ", actual_run_time=" +
+               std::to_string(timing.actual_run_time) +
+               ", num_nodes=" + std::to_string(timing.num_nodes) +
+               ", scheduled=" + (timing.scheduled ? "true" : "false") +
+               ")";
+      });
+
   // Main Simulation class
   py::class_<Simulation>(m, "Simulation")
       .def(py::init<const Sim_Params &>(), py::arg("params"),
@@ -224,6 +255,11 @@ PYBIND11_MODULE(dr_evt, m) {
            "Args:\n    target_time (float): Inclusive time bound.\n"
            "Returns:\n    None")
 
+      .def("flush_completed_jobs", &Simulation::flush_completed_jobs,
+           "Write and reclaim completed jobs through the current simulation "
+           "time. Reclaimed job identifiers are no longer available to the "
+           "timing accessors.")
+
       // Monitoring - Basic state
       .def("get_current_time", &Simulation::get_current_time,
            "Return the current simulation time as float.")
@@ -258,6 +294,15 @@ PYBIND11_MODULE(dr_evt, m) {
            "Estimate the Custom-FCFS waiting-queue drain time from the FCFS "
            "shadow time. Requires EASY backfilling; future arrivals are "
            "excluded.")
+
+      .def("get_job_timing", &Simulation::get_job_timing, py::arg("job_idx"),
+           "Return a read-only JobTiming snapshot for one job. Raises "
+           "IndexError if the identifier was never appended or was reclaimed.")
+
+      .def("get_job_timings", &Simulation::get_job_timings,
+           py::arg("job_idxs"),
+           "Return read-only JobTiming snapshots in the requested order. "
+           "Raises IndexError for an unknown or reclaimed identifier.")
 
       // Monitoring - Comprehensive statistics
       .def("get_statistics", &Simulation::get_statistics,

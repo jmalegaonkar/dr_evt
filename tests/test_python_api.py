@@ -20,6 +20,7 @@ Note: Scheduler uses time_limit as the best estimator for planning.
 run_time_mode is set to LIMIT so jobs run exactly their time_limit.
 """
 
+import csv
 import sys
 import os
 import subprocess
@@ -75,6 +76,23 @@ def create_test_trace(filename, jobs):
         f.write("job_submit_time,num_nodes,time_limit\n")
         for job in jobs:
             f.write(f"{job[0]},{job[1]},{job[2]}\n")
+
+
+def find_simulator(repo_root):
+    """Find the simulator using the configured or local build prefix."""
+    configured_prefix = os.environ.get("CMAKE_INSTALL_PREFIX")
+    if configured_prefix:
+        candidates = [os.path.join(configured_prefix, "bin", "simulator")]
+    else:
+        candidates = [
+            os.path.join(repo_root, "install", "bin", "simulator"),
+            os.path.join(repo_root, "build", "simulator"),
+        ]
+
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    raise AssertionError("simulator not found: " + ", ".join(candidates))
 
 
 def test_module_import(result):
@@ -359,6 +377,143 @@ def test_custom_backfill_api(result):
         os.unlink(trace_file.name)
 
 
+def test_job_timing_api(result):
+    """Test Python job timing accessors and CLI trace parity."""
+    print("\n5c. Job Timing API")
+
+    trace_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+    trace_file.close()
+
+    try:
+        create_test_trace(trace_file.name, [
+            (0, 10, 10),
+            (0, 20, 20),
+        ])
+
+        params = dr_evt.SimParams()
+        params.infile = trace_file.name
+        params.total_nodes = 100
+        params.trace_format = "simple"
+        params.timestamp_format = "epoch"
+        params.run_time_mode = dr_evt.RunTimeMode.LIMIT
+        params.backfill_policy = dr_evt.BackfillPolicy.EASY
+        params.priority_policy = dr_evt.PriorityPolicy.FCFS
+
+        sim = dr_evt.Simulation(params)
+        job0 = sim.append_job(0.0, 10, QUEUE_INPUT, 10)
+        job1 = sim.append_job(0.0, 20, QUEUE_INPUT, 20)
+
+        unscheduled = sim.get_job_timing(job0)
+        assert isinstance(unscheduled, dr_evt.JobTiming)
+        assert repr(unscheduled).startswith("JobTiming(")
+        assert unscheduled.job_idx == job0
+        assert unscheduled.submit_time == 0.0
+        assert unscheduled.begin_time == -1.0
+        assert unscheduled.end_time == -1.0
+        assert unscheduled.limit_time == 10
+        assert unscheduled.actual_run_time == 0.0
+        assert unscheduled.num_nodes == 10
+        assert unscheduled.scheduled is False
+        result.record_pass("Unscheduled JobTiming")
+
+        sim.advance_to(0.0)
+        scheduled = sim.get_job_timing(job0)
+        assert scheduled.begin_time == 0.0
+        assert scheduled.end_time == 10.0
+        assert scheduled.actual_run_time == 10.0
+        assert scheduled.scheduled is True
+        result.record_pass("Scheduled JobTiming")
+
+        timings = sim.get_job_timings([job1, job0])
+        assert [timing.job_idx for timing in timings] == [job1, job0]
+        assert timings[0].begin_time == 0.0
+        assert timings[0].end_time == 20.0
+        result.record_pass("Batch JobTiming order")
+
+        try:
+            sim.get_job_timing(99)
+        except IndexError as error:
+            assert "99" in str(error)
+        else:
+            raise AssertionError("unknown job identifier did not raise IndexError")
+        result.record_pass("Unknown JobTiming raises IndexError")
+
+        sim.advance_to(20.0)
+        sim.flush_completed_jobs()
+        try:
+            sim.get_job_timing(job0)
+        except IndexError as error:
+            assert str(job0) in str(error)
+        else:
+            raise AssertionError("reclaimed job identifier remained available")
+        result.record_pass("Reclaimed JobTiming raises IndexError")
+
+        nodes = [20, 30, 15, 40, 25, 10, 35, 60, 20, 45]
+        limits = [200, 150, 300, 100, 250, 80, 180, 220, 90, 160]
+        jobs = [(index * 10, nodes[index], limits[index])
+                for index in range(10)]
+        expected_begin_times = [0, 10, 20, 160, 160, 50, 260, 410, 260, 630]
+        create_test_trace(trace_file.name, jobs)
+        stream_params = dr_evt.SimParams()
+        stream_params.infile = trace_file.name
+        stream_params.total_nodes = 100
+        stream_params.trace_format = "simple"
+        stream_params.timestamp_format = "epoch"
+        stream_params.run_time_mode = dr_evt.RunTimeMode.LIMIT
+        stream_params.backfill_policy = dr_evt.BackfillPolicy.EASY
+        stream_params.priority_policy = dr_evt.PriorityPolicy.FCFS
+
+        stream_sim = dr_evt.Simulation(stream_params)
+        job_idxs = []
+        for submit_time, num_nodes, limit_time in jobs:
+            job_idxs.append(stream_sim.append_job(
+                float(submit_time), num_nodes, QUEUE_INPUT, limit_time))
+            stream_sim.advance_to(float(submit_time))
+        stream_sim.advance_to(1000.0)
+        stream_timings = stream_sim.get_job_timings(job_idxs)
+        actual_begin_times = [timing.begin_time for timing in stream_timings]
+        assert actual_begin_times == [float(begin_time)
+                                      for begin_time in expected_begin_times], \
+            f"begin times: {actual_begin_times}"
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        simulator = find_simulator(repo_root)
+        with tempfile.TemporaryDirectory(prefix="dr_evt_job_timing_") as output_dir:
+            simulated_file = os.path.join(output_dir, "simulated.csv")
+            command = [
+                simulator,
+                trace_file.name,
+                "--total_nodes", "100",
+                "--trace_format", "simple",
+                "--timestamp_format", "epoch",
+                "--run_time_mode", "limit",
+                "--backfill_policy", "easy",
+                "--priority_policy", "fcfs",
+                "--outfile", simulated_file,
+            ]
+            completed = subprocess.run(
+                command, capture_output=True, text=True, check=False)
+            assert completed.returncode == 0, \
+                completed.stderr or completed.stdout
+            with open(simulated_file, newline='', encoding='utf-8') as output:
+                output_rows = list(csv.DictReader(output))
+            assert len(output_rows) == len(stream_timings)
+            for timing, row in zip(stream_timings, output_rows):
+                assert timing.scheduled is True
+                assert timing.submit_time == float(row["job_submit_time"])
+                assert timing.begin_time == float(row["begin_time"])
+                assert timing.end_time == float(row["end_time"])
+                assert timing.num_nodes == int(row["num_nodes"])
+                assert timing.limit_time == int(row["time_limit"])
+                assert timing.actual_run_time == float(row["time_limit"])
+        result.record_pass("Ten-job timing matches simulator CSV")
+
+    except Exception as e:
+        result.record_fail("Job timing API", str(e))
+    finally:
+        os.unlink(trace_file.name)
+
+
 def test_statistics(result):
     """Test 6: Statistics"""
     print("\n6. Statistics API")
@@ -566,6 +721,7 @@ def main():
     test_monitoring_api(result)
     test_backfill_window_api(result)
     test_custom_backfill_api(result)
+    test_job_timing_api(result)
     test_statistics(result)
     test_backfill_policies(result)
     test_priority_policies(result)
