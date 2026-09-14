@@ -45,6 +45,7 @@ message ClientMessage {
         FinishSimulationRequest finish_simulation = 15;
         GetBackfillWindowRequest get_backfill_window = 16;
         GetCurrentUtilizationRequest get_current_utilization = 17;
+        GetJobTimingsRequest get_job_timings = 18;
     }
 }
 
@@ -151,6 +152,14 @@ message GetBackfillWindowRequest {}
 // Instantaneous nodes-in-use / total-nodes ratio. This is distinct from the
 // resource-area-based utilization in GetStatisticsResponse.
 message GetCurrentUtilizationRequest {}
+
+// Returns read-only timing snapshots for the requested permanent job IDs.
+// An ID that was never appended or was already reclaimed makes the whole
+// request fail with ErrorResponse. Callers that need every job's timing must
+// request it before the next append or explicit flush.
+message GetJobTimingsRequest {
+    repeated uint64 job_idx = 1;
+}
 message GetStatisticsRequest {}
 message GetTraceSizeRequest {}
 
@@ -178,6 +187,7 @@ message ServerMessage {
         FinishSimulationResponse finish_simulation = 16;
         GetBackfillWindowResponse get_backfill_window = 17;
         GetCurrentUtilizationResponse get_current_utilization = 18;
+        GetJobTimingsResponse get_job_timings = 19;
     }
 }
 
@@ -255,6 +265,22 @@ message GetBackfillWindowResponse {
     // Ordered release events in (current_time, shadow_time]. Empty when
     // there is no FCFS head or it can start immediately.
     repeated ResourceRelease releases = 4;
+}
+
+message JobTimingData {
+    uint64 job_idx = 1;
+    double submit_time = 2;
+    double begin_time = 3;
+    double end_time = 4;
+    double limit_time = 5;
+    double actual_run_time = 6;
+    uint32 num_nodes = 7;
+    bool scheduled = 8;
+}
+
+// Timing snapshots are returned in the same order as the requested IDs.
+message GetJobTimingsResponse {
+    repeated JobTimingData timings = 1;
 }
 
 message GetStatisticsResponse {

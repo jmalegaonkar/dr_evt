@@ -22,6 +22,7 @@
 #include <grpcpp/grpcpp.h>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "dr_evt_config.hpp"
@@ -354,6 +355,105 @@ bool test_backfill_window(const std::string &server_address,
   return true;
 }
 
+// Test 4: GetJobTimingsRequest returns the requested job snapshots in order
+// and reports an unknown permanent ID as an ErrorResponse for the request.
+bool test_job_timings(const std::string &server_address,
+                      const std::string &trace_file) {
+  std::cout << "=== Test: GetJobTimingsRequest ===\n";
+  SimulationClient client(
+      grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials()));
+
+  try {
+    connect_and_init(client, trace_file);
+
+    ClientMessage append0;
+    auto *request0 = append0.mutable_append_job();
+    request0->set_submit_time(0.0);
+    request0->set_num_nodes(10);
+    request0->set_queue(kTestQueueInput);
+    request0->set_limit_time(100.0);
+    if (client.call(append0).append_job().job_idx() != 0) {
+      std::cerr << "  FAIL: first appended job was not job 0\n";
+      client.finish();
+      return false;
+    }
+
+    ClientMessage append1;
+    auto *request1 = append1.mutable_append_job();
+    request1->set_submit_time(5.0);
+    request1->set_num_nodes(20);
+    request1->set_queue(kTestQueueInput);
+    request1->set_limit_time(200.0);
+    if (client.call(append1).append_job().job_idx() != 1) {
+      std::cerr << "  FAIL: second appended job was not job 1\n";
+      client.finish();
+      return false;
+    }
+
+    ClientMessage advance;
+    advance.mutable_advance_to()->set_target_time(5.0);
+    client.call(advance);
+
+    ClientMessage query;
+    auto *timing_request = query.mutable_get_job_timings();
+    timing_request->add_job_idx(1);
+    timing_request->add_job_idx(0);
+    const auto response = client.call(query);
+    const auto &timings = response.get_job_timings().timings();
+    const bool expected_timings =
+        timings.size() == 2 && timings[0].job_idx() == 1 &&
+        std::fabs(timings[0].submit_time() - 5.0) < 1e-12 &&
+        std::fabs(timings[0].begin_time() - 5.0) < 1e-12 &&
+        std::fabs(timings[0].end_time() - 205.0) < 1e-12 &&
+        std::fabs(timings[0].limit_time() - 200.0) < 1e-12 &&
+        std::fabs(timings[0].actual_run_time() - 200.0) < 1e-12 &&
+        timings[0].num_nodes() == 20 && timings[0].scheduled() &&
+        timings[1].job_idx() == 0 &&
+        std::fabs(timings[1].submit_time()) < 1e-12 &&
+        std::fabs(timings[1].begin_time()) < 1e-12 &&
+        std::fabs(timings[1].end_time() - 100.0) < 1e-12 &&
+        std::fabs(timings[1].limit_time() - 100.0) < 1e-12 &&
+        std::fabs(timings[1].actual_run_time() - 100.0) < 1e-12 &&
+        timings[1].num_nodes() == 10 && timings[1].scheduled();
+    if (!expected_timings) {
+      std::cerr << "  FAIL: unexpected job timing response\n";
+      client.finish();
+      return false;
+    }
+
+    bool unknown_threw = false;
+    try {
+      ClientMessage unknown;
+      unknown.mutable_get_job_timings()->add_job_idx(99);
+      client.call(unknown);
+    } catch (const std::runtime_error &error) {
+      unknown_threw = true;
+      if (std::string(error.what()).find("99") == std::string::npos) {
+        std::cerr << "  FAIL: unknown-ID error did not name job 99\n";
+        client.finish();
+        return false;
+      }
+    }
+    if (!unknown_threw) {
+      std::cerr << "  FAIL: unknown job ID did not return an error\n";
+      client.finish();
+      return false;
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "  FAIL: " << e.what() << "\n";
+    client.finish();
+    return false;
+  }
+
+  grpc::Status status = client.finish();
+  if (!status.ok()) {
+    std::cerr << "  FAIL: RPC failed: " << status.error_message() << "\n";
+    return false;
+  }
+  std::cout << "  PASSED\n";
+  return true;
+}
+
 int main(int argc, char **argv) {
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0]
@@ -371,6 +471,7 @@ int main(int argc, char **argv) {
   ok &= test_single_append(server_address, trace_file);
   ok &= test_batch_append(server_address, trace_file);
   ok &= test_backfill_window(server_address, trace_file);
+  ok &= test_job_timings(server_address, trace_file);
 
   if (!ok) {
     std::cerr << "SOME TESTS FAILED\n";

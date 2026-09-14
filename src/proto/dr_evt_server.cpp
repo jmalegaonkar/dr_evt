@@ -378,6 +378,29 @@ public:
           }
           break;
         }
+        case ClientMessage::kGetJobTimings: {
+          require_init(sim);
+          const auto &request = req.get_job_timings();
+          std::vector<dr_evt::job_no_t> job_idxs;
+          job_idxs.reserve(request.job_idx_size());
+          for (const uint64_t job_idx : request.job_idx()) {
+            job_idxs.push_back(static_cast<dr_evt::job_no_t>(job_idx));
+          }
+          const auto timings = sim->get_job_timings(job_idxs);
+          auto *out = resp.mutable_get_job_timings();
+          for (const auto &timing : timings) {
+            auto *data = out->add_timings();
+            data->set_job_idx(static_cast<uint64_t>(timing.job_idx));
+            data->set_submit_time(timing.submit_time);
+            data->set_begin_time(timing.begin_time);
+            data->set_end_time(timing.end_time);
+            data->set_limit_time(static_cast<double>(timing.limit_time));
+            data->set_actual_run_time(timing.actual_run_time);
+            data->set_num_nodes(timing.num_nodes);
+            data->set_scheduled(timing.scheduled);
+          }
+          break;
+        }
         case ClientMessage::kGetStatistics: {
           require_init(sim);
           auto stats = sim->get_statistics();
