@@ -417,6 +417,56 @@ public:
   tdiff_t get_prediction_horizon(double utilization) const;
 
   /**
+   * @brief Timing and scheduling state for one job.
+   * @details This is a read-only snapshot. An accessor call throws
+   * std::out_of_range with the offending job identifier when the job was
+   * never appended or was already reclaimed by capacity pressure at append
+   * time or by flush_completed_jobs(). A caller that needs every job's
+   * timing must read it before the next append or flush. For a job that has
+   * started, end_time is its projected end, equal to start plus actual run
+   * time, which is how dr_evt records job ends.
+   */
+  struct Job_Timing {
+    job_no_t job_idx;
+    sim_time_t submit_time;      ///< -1 when the record has no valid submission.
+    sim_time_t begin_time;       ///< -1 until the job has started.
+    sim_time_t end_time;         ///< -1 until the job has started.
+    timeout_t limit_time;
+    tdiff_t actual_run_time;     ///< 0 until determined.
+    num_nodes_t num_nodes;
+    bool scheduled;              ///< Job_Record::is_scheduled().
+  };
+
+  /**
+   * @brief Return read-only timing for one job.
+   * @details Throws std::out_of_range with the offending job identifier when
+   * the job was never appended or was already reclaimed by capacity pressure
+   * at append time or by flush_completed_jobs(). A caller that needs every
+   * job's timing must read it before the next append or flush. For a job that
+   * has started, end_time is its projected end, equal to start plus actual
+   * run time, which is how dr_evt records job ends.
+   * @param[in] job_idx Permanent job identifier.
+   * @return Read-only timing snapshot for the requested job.
+   */
+  Job_Timing get_job_timing(job_no_t job_idx) const;
+
+  /**
+   * @brief Return read-only timing snapshots in request order.
+   * @details Throws std::out_of_range with the first offending job identifier
+   * when any requested job was never appended or was already reclaimed by
+   * capacity pressure at append time or by flush_completed_jobs(). A caller
+   * that needs every job's timing must read it before the next append or
+   * flush. For a job that has started, end_time is its projected end, equal
+   * to start plus actual run time, which is how dr_evt records job ends. The
+   * result is built only after each requested identifier succeeds, so an
+   * invalid request produces no partial result.
+   * @param[in] job_idxs Permanent job identifiers.
+   * @return Timing snapshots in the same order as job_idxs.
+   */
+  std::vector<Job_Timing>
+  get_job_timings(const std::vector<job_no_t> &job_idxs) const;
+
+  /**
    * Get detailed scheduling statistics
    * @return Structure with wait times, turnaround, utilization
    */

@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <queue>
 #include <sstream>
+#include <stdexcept>
 
 namespace dr_evt {
 
@@ -936,6 +937,51 @@ BasicSimulation<TraceType>::get_prediction_horizon(double utilization) const {
   }
   return m_custom_scheduler->prediction_horizon(m_running_jobs, m_current_time,
                                                 utilization);
+}
+
+template <typename TraceType>
+typename BasicSimulation<TraceType>::Job_Timing
+BasicSimulation<TraceType>::get_job_timing(job_no_t job_idx) const {
+  const size_t num_reclaimed = m_trace.num_reclaimed();
+  const bool is_reclaimed = job_idx < num_reclaimed;
+  const size_t resident_idx =
+      is_reclaimed ? static_cast<size_t>(0) : job_idx - num_reclaimed;
+  if (is_reclaimed || resident_idx >= m_trace.data().size()) {
+    throw std::out_of_range("get_job_timing(): job_idx=" +
+                            std::to_string(job_idx) +
+                            " is not available");
+  }
+
+  const auto &job = m_trace.job_at(job_idx);
+  const bool scheduled = job.is_scheduled();
+  const epoch_t unscheduled = Job_Record::unscheduled_sentinel();
+  const epoch_t submit_epoch = job.get_submit_time();
+
+  const sim_time_t submit_time =
+      submit_epoch == unscheduled
+          ? static_cast<sim_time_t>(-1.0)
+          : convert_epoch<sim_time_t>(submit_epoch);
+  const sim_time_t begin_time =
+      scheduled ? convert_epoch<sim_time_t>(job.get_begin_time())
+                : static_cast<sim_time_t>(-1.0);
+  const sim_time_t end_time =
+      scheduled ? convert_epoch<sim_time_t>(job.get_end_time())
+                : static_cast<sim_time_t>(-1.0);
+
+  return {job_idx, submit_time, begin_time, end_time, job.get_limit_time(),
+          job.get_actual_run_time(), job.get_num_nodes(), scheduled};
+}
+
+template <typename TraceType>
+std::vector<typename BasicSimulation<TraceType>::Job_Timing>
+BasicSimulation<TraceType>::get_job_timings(
+    const std::vector<job_no_t> &job_idxs) const {
+  std::vector<Job_Timing> timings;
+  timings.reserve(job_idxs.size());
+  for (const job_no_t job_idx : job_idxs) {
+    timings.push_back(get_job_timing(job_idx));
+  }
+  return timings;
 }
 
 template <typename TraceType>

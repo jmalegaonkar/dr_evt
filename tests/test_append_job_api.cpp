@@ -395,6 +395,66 @@ void test_basic_append_and_run() {
   std::cout << "  PASSED" << std::endl;
 }
 
+void test_job_timing_accessor() {
+  std::cout << "\n=== Job timing accessor ===" << std::endl;
+
+  Simulation sim(make_params());
+  sim.get_trace().load_data(0);
+
+  const job_no_t j0 = sim.append_job(0.0, 10, kTestQueueInput, 10);
+  const job_no_t j1 = sim.append_job(0.0, 20, kTestQueueInput, 20);
+
+  const Simulation::Job_Timing unscheduled = sim.get_job_timing(j0);
+  assert(unscheduled.job_idx == j0);
+  assert(unscheduled.submit_time == 0.0);
+  assert(unscheduled.begin_time == -1.0);
+  assert(unscheduled.end_time == -1.0);
+  assert(unscheduled.limit_time == 10);
+  assert(unscheduled.actual_run_time == 0.0);
+  assert(unscheduled.num_nodes == 10);
+  assert(!unscheduled.scheduled);
+
+  sim.advance_to(0.0);
+
+  const Simulation::Job_Timing scheduled = sim.get_job_timing(j0);
+  assert(scheduled.begin_time == 0.0);
+  assert(scheduled.end_time == 10.0);
+  assert(scheduled.actual_run_time == 10.0);
+  assert(scheduled.scheduled);
+
+  const std::vector<job_no_t> requested = {j1, j0};
+  const auto timings = sim.get_job_timings(requested);
+  assert(timings.size() == 2);
+  assert(timings[0].job_idx == j1);
+  assert(timings[0].begin_time == 0.0);
+  assert(timings[0].end_time == 20.0);
+  assert(timings[1].job_idx == j0);
+
+  bool unknown_threw = false;
+  try {
+    sim.get_job_timing(99);
+  } catch (const std::out_of_range &error) {
+    unknown_threw = true;
+    assert(std::string(error.what()).find("99") != std::string::npos);
+  }
+  assert(unknown_threw);
+
+  sim.advance_to(20.0);
+  sim.flush_completed_jobs();
+
+  bool reclaimed_threw = false;
+  try {
+    sim.get_job_timing(j0);
+  } catch (const std::out_of_range &error) {
+    reclaimed_threw = true;
+    assert(std::string(error.what()).find(std::to_string(j0)) !=
+           std::string::npos);
+  }
+  assert(reclaimed_threw);
+
+  std::cout << "  PASSED" << std::endl;
+}
+
 // Test 11: exclusive vs inclusive advance - run_until_exclusive() must
 // not process an event exactly at its target time, advance_to() must.
 void test_exclusive_vs_inclusive() {
@@ -917,6 +977,7 @@ int main() {
     test_append_jobs_empty_batch();
     test_append_jobs_batch_capacity_isolated_from_single_job_fallback();
     test_basic_append_and_run();
+    test_job_timing_accessor();
     test_exclusive_vs_inclusive();
     test_online_scheduling();
     test_no_resource_leaks();
