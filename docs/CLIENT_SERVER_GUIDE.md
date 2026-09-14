@@ -38,6 +38,7 @@ in-process via the streaming API:
 | `RunUntilExclusiveRequest` | `Simulation::run_until_exclusive()` |
 | `GetFCFSHeadShadowTimeRequest` | FCFS-head shadow time only: the earliest reserved start time, or `-1` with no waiting head |
 | `GetBackfillWindowRequest` | One FCFS/EASY reservation snapshot: current capacity, shadow time, and projected releases |
+| `GetJobTimingsRequest` | Read-only timing snapshots in request order; an unknown or reclaimed ID returns an `ErrorResponse` for the whole request |
 | `GetStatisticsRequest`, `GetCurrentTimeRequest`, etc. | The monitoring/statistics methods |
 
 Every `ClientMessage` carries a `request_id`, echoed back on the matching
@@ -76,6 +77,9 @@ For example, with no free nodes, a 40-node job predicted to end at time 50,
 a 60-node job predicted to end at time 100, and a 100-node FCFS head, the
 response at time 0 has `shadow_time = 100` and releases `(50, 40)` and
 `(100, 60)`.
+
+For per-job submission and projected execution times, use the
+`GetJobTimingsRequest` entry in the request table above.
 
 Session initialization, completion, reuse, and shutdown are documented in
 [Client/Server Setup](user-guide/grpc-setup.md#session-identity-and-completion).

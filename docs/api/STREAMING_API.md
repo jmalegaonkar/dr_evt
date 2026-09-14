@@ -296,6 +296,35 @@ interval. If the final currently running job completes before the threshold
 is reached, the remaining area is converted to time using
 `utilization * total_nodes`. An empty queue returns zero.
 
+**Get per-job timing (submission, start, projected end):**
+
+```cpp
+Simulation::Job_Timing get_job_timing(job_no_t job_idx) const;
+std::vector<Simulation::Job_Timing> get_job_timings(
+    const std::vector<job_no_t>& job_idxs) const;
+```
+
+These read-only accessors return submission, begin, projected end, time limit,
+actual run time, node count, and scheduling state for an appended job. An
+unscheduled job has `begin_time` and `end_time` equal to `-1`; its
+`submit_time` remains valid unless the job was rejected before scheduling. For
+a job that has started, `end_time` is its projected end, equal to start plus
+actual run time, which is how dr_evt records job ends.
+
+An unknown or reclaimed job ID raises `std::out_of_range` and includes the ID
+in the error. Reclamation can happen when capacity pressure is handled at a
+later append or when `flush_completed_jobs()` is called, so a caller that
+needs every job's timing must read it before the next append or flush. The
+batch accessor preserves request order and throws for the whole request if any
+ID is invalid.
+
+```cpp
+auto timing = sim.get_job_timing(job_idx);
+if (timing.scheduled) {
+    std::cout << timing.begin_time << " to " << timing.end_time << "\n";
+}
+```
+
 **Get scheduling statistics** (wait times, turnaround, utilization):
 ```cpp
 Simulation::Statistics get_statistics() const;

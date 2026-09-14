@@ -88,6 +88,7 @@ Their scheduling semantics are documented in
 | `append_job(submit_time, num_nodes, queue, limit_time)` | Append and enqueue one live job; return its ID. |
 | `append_jobs(requests)` | Atomically append and enqueue ordered `JobAppendRequest` values; return their IDs. |
 | `advance_to(target_time)` | Process events at or before the target. |
+| `flush_completed_jobs()` | Write and reclaim the completed front prefix at the current time; reclaimed IDs are no longer available to the timing accessors. |
 | `run_until_exclusive(target_time)` | Process events strictly before the target. |
 | `get_current_time()` | Return current simulation time. |
 | `get_nodes_in_use()` | Return allocated nodes. |
@@ -98,6 +99,8 @@ Their scheduling semantics are documented in
 | `get_fcfs_head_shadow_time()` | Return the FCFS-head reservation time, or `-1`. |
 | `get_backfill_window()` | Return the current FCFS/EASY reservation snapshot. |
 | `get_prediction_horizon(utilization)` | Estimate the Custom-FCFS/EASY waiting-queue drain time from the FCFS shadow time. |
+| `get_job_timing(job_idx)` | Return a read-only `JobTiming`; raise `IndexError` for an unknown or reclaimed ID. |
+| `get_job_timings(job_idxs)` | Return read-only `JobTiming` values in request order; raise `IndexError` for the whole request if any ID is invalid. |
 | `get_statistics()` | Return a `Statistics` snapshot. |
 | `write_simulated_trace()` | Write the configured job-schedule output. |
 | `print_stats()` | Print summary statistics. |
@@ -114,6 +117,15 @@ entry passed to `append_jobs()`.
 `BackfillWindow` exposes `current_time`, `available_nodes`,
 `shadow_time`, and an ordered list of `ResourceRelease` values. Each release
 contains `time` and `nodes_released`.
+
+`JobTiming` exposes `job_idx`, `submit_time`, `begin_time`, `end_time`,
+`limit_time`, `actual_run_time`, `num_nodes`, and `scheduled`. It is a
+read-only snapshot. Unscheduled jobs report `-1` for `begin_time` and
+`end_time`; `submit_time` is `-1` only when the record has no valid
+submission. For a started job, `end_time` is its projected end, equal to its
+start plus actual run time. An ID can be reclaimed by capacity pressure at a
+later append or by `flush_completed_jobs()`, so read timings before the next
+append or flush.
 
 `Statistics` exposes:
 
