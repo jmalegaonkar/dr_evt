@@ -71,3 +71,6 @@ VERIFICATION_COMPLETE.md
 docs/_build/
 docs/doxygen/
 venv_docs/
+
+# scratch output of the notebooks under learn/
+learn/output/
