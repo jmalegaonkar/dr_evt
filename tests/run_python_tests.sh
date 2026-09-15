@@ -19,7 +19,10 @@ echo ""
 # Find installed Python bindings. A CPython extension is tied to the major and
 # minor interpreter version encoded in its filename (for example, cpython-313).
 INSTALL_PREFIX="${CMAKE_INSTALL_PREFIX:-./install}"
-mapfile -t PYTHON_MODULES < <(
+PYTHON_MODULES=()
+while IFS= read -r module_path; do
+    PYTHON_MODULES+=("$module_path")
+done < <(
     find "$INSTALL_PREFIX/lib/python" "$INSTALL_PREFIX/lib64/python" \
         -type f -name "dr_evt*.so" -print 2>/dev/null | LC_ALL=C sort
 )
