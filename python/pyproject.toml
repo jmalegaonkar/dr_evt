@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dr_evt_market"
+version = "0.1.0"
+description = "Platform adapters for federated markets over DR_EVT"
+readme = "README.md"
+authors = [{name = "LLNL"}]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+grpc = ["grpcio", "grpcio-tools", "protobuf"]
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dr_evt_market*"]
