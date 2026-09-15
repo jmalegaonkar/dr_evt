@@ -341,7 +341,7 @@ jobs:
           echo "  Job Store (6 tests): ${{ steps.job-store.outcome }}"
           echo "  Config (9 tests): ${{ steps.config.outcome }}"
           echo "  Native CTest (12 + MPI when available): ${{ steps.core-ctest.outcome }}"
-          echo "  Python API (23 tests): ${{ steps.python-api.outcome }}"
+          echo "  Python API (27 tests): ${{ steps.python-api.outcome }}"
           echo "  Append-Job (20 C++ + 4 gRPC): ${{ steps.append-job.outcome }}"
           echo "  Backfill-window focused rerun (4 checks already counted): ${{ steps.backfill-window.outcome }}"
           echo "  Single-Coordinator gRPC: ${{ steps.grpc-single-coordinator.outcome }}"

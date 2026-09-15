@@ -47,6 +47,9 @@ or `None`.
 
 `SimParams` currently exposes these mutable attributes:
 
+Set every field before constructing the `Simulation`; it keeps a reference to
+the parameters object, which must outlive it.
+
 | Attribute | Type |
 |---|---|
 | `infile` | `str` |
@@ -58,10 +61,23 @@ or `None`.
 | `num_max_candidates` | `int` |
 | `priority_policy` | `PriorityPolicy` |
 | `verbose` | `bool` |
+| `seed` | `int` |
+| `msec_output` | `bool` |
+| `run_time_scale` | `float` |
+| `run_time_stddev` | `float` |
+| `run_time_distribution` | `DistributionType` |
+| `outfile` | `str` |
+| `resource_trace` | `str` |
 
-Other C++/CLI configuration fields are not exposed by the binding. Use the
-`simulator` executable when one of those settings is required; its options
-are documented in [Command-Line Options](../user-guide/command-line.md).
+Sampling fields apply to trace-loaded jobs, since a job added with
+`append_job()` runs for exactly its limit at this commit. `outfile=""` selects
+the default derived from `infile`; `resource_trace` names the file to pass to
+`write_resource_trace()`. The simulated-trace header carries a `q_id` column
+only when the input header had one.
+
+Configuration fields not listed above are not exposed by the binding. Use the
+`simulator` executable when one of those settings is required; its options are
+documented in [Command-Line Options](../user-guide/command-line.md).
 
 The module exports `legacy_queue_input`, a Boolean indicating whether queue
 arguments use legacy names or numeric IDs.
@@ -70,6 +86,8 @@ arguments use legacy names or numeric IDs.
 
 - `RunTimeMode.ACTUAL`, `RunTimeMode.DISTRIBUTION`,
   `RunTimeMode.LIMIT`
+- `DistributionType.NORMAL`, `DistributionType.LOGNORMAL`,
+  `DistributionType.UNIFORM`
 - `BackfillPolicy.NONE`, `BackfillPolicy.EASY`,
   `BackfillPolicy.CONSERVATIVE`
 - `PriorityPolicy.FCFS`, `PriorityPolicy.FCFS_CONSERVATIVE`,
@@ -103,6 +121,7 @@ Their scheduling semantics are documented in
 | `get_job_timings(job_idxs)` | Return read-only `JobTiming` values in request order; raise `IndexError` for the whole request if any ID is invalid. |
 | `get_statistics()` | Return a `Statistics` snapshot. |
 | `write_simulated_trace()` | Write the configured job-schedule output. |
+| `write_resource_trace(filename)` | Write the resource-history CSV to `filename`. |
 | `print_stats()` | Print summary statistics. |
 | `get_trace_size()` | Return the number of records currently in the job store. |
 

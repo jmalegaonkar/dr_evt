@@ -177,10 +177,151 @@ def test_sim_params(result):
         params.num_max_candidates = 8
         params.priority_policy = dr_evt.PriorityPolicy.FCFS
         params.verbose = False
+        params.seed = 42
+        params.msec_output = True
+        params.run_time_scale = 0.75
+        params.run_time_stddev = 0.2
+        params.run_time_distribution = dr_evt.DistributionType.LOGNORMAL
+        params.outfile = "simulated.csv"
+        params.resource_trace = "resource.csv"
+
+        assert params.seed == 42
+        assert params.msec_output is True
+        assert params.run_time_scale == 0.75
+        assert params.run_time_stddev == 0.2
+        assert params.run_time_distribution == dr_evt.DistributionType.LOGNORMAL
+        assert params.outfile == "simulated.csv"
+        assert params.resource_trace == "resource.csv"
 
         result.record_pass("SimParams creation and configuration")
     except Exception as e:
         result.record_fail("SimParams", str(e))
+
+
+def test_sim_params_output(result):
+    """Test configured simulated-trace filenames and timestamp precision."""
+    print("\n3b. SimParams Output Configuration")
+
+    trace_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+    trace_file.close()
+
+    try:
+        queue_column = "queue" if dr_evt.legacy_queue_input else "q_id"
+        with open(trace_file.name, 'w', encoding='utf-8') as output:
+            output.write(
+                f"job_submit_time,num_nodes,{queue_column},time_limit\n"
+            )
+
+        with tempfile.TemporaryDirectory(prefix="dr_evt_sim_params_") as output_dir:
+            output_file = os.path.join(output_dir, "simulated.csv")
+            params = dr_evt.SimParams()
+            params.infile = trace_file.name
+            params.total_nodes = 100
+            params.trace_format = "simple"
+            params.timestamp_format = "epoch"
+            params.run_time_mode = dr_evt.RunTimeMode.LIMIT
+            params.outfile = output_file
+            resource_file = os.path.join(output_dir, "resource.csv")
+            params.resource_trace = resource_file
+
+            sim = dr_evt.Simulation(params)
+            sim.append_job(0.125, 10, QUEUE_INPUT, 7)
+            sim.advance_to(0.125)
+            sim.advance_to(7.125)
+            sim.write_simulated_trace()
+            sim.write_resource_trace(resource_file)
+
+            assert os.path.isfile(output_file)
+            with open(output_file, encoding='utf-8') as output:
+                header = output.readline().strip().split(',')
+            assert header == [
+                "job_submit_time", "begin_time", "end_time", "num_nodes",
+                "exit_status", queue_column, "time_limit"
+            ]
+            result.record_pass("Configured outfile writes seven-column trace")
+
+            with open(resource_file, encoding='utf-8') as output:
+                resource_rows = [line.strip() for line in output if line.strip()]
+            assert "0,90,10" in resource_rows
+            assert "7,100,0" in resource_rows
+            result.record_pass("Configured resource_trace writes allocation history")
+
+            msec_output_file = os.path.join(output_dir, "simulated_msec.csv")
+            msec_params = dr_evt.SimParams()
+            msec_params.infile = trace_file.name
+            msec_params.total_nodes = 100
+            msec_params.trace_format = "simple"
+            msec_params.timestamp_format = "epoch"
+            msec_params.run_time_mode = dr_evt.RunTimeMode.LIMIT
+            msec_params.msec_output = True
+            msec_params.outfile = msec_output_file
+
+            msec_sim = dr_evt.Simulation(msec_params)
+            msec_sim.append_job(0.125, 10, QUEUE_INPUT, 7)
+            msec_sim.advance_to(0.125)
+            msec_sim.write_simulated_trace()
+
+            with open(msec_output_file, encoding='utf-8') as output:
+                output.readline()
+                fields = output.readline().strip().split(',')
+            assert fields[:3] == ["0.125", "0.125", "7.125"]
+            assert fields[-1] == "7.000"
+            result.record_pass("Millisecond output uses three decimals")
+    except Exception as e:
+        result.record_fail("SimParams output", str(e))
+    finally:
+        os.unlink(trace_file.name)
+
+
+def test_run_time_distribution(result):
+    """Test seeded runtime sampling in batch mode."""
+    print("\n3c. Run-Time Distribution")
+
+    trace_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+    trace_file.close()
+
+    try:
+        create_test_trace(trace_file.name, [
+            (0, 10, 100),
+            (0, 10, 100),
+            (0, 10, 100),
+        ])
+
+        def run_batch(seed, run_time_mode):
+            params = dr_evt.SimParams()
+            params.infile = trace_file.name
+            params.total_nodes = 100
+            params.trace_format = "simple"
+            params.timestamp_format = "epoch"
+            params.seed = seed
+            params.run_time_mode = run_time_mode
+            params.run_time_distribution = dr_evt.DistributionType.NORMAL
+            params.run_time_scale = 0.5
+            params.run_time_stddev = 0.2
+
+            sim = dr_evt.Simulation(params)
+            sim.initialize_trace()
+            sim.run()
+            return [
+                timing.actual_run_time
+                for timing in sim.get_job_timings([0, 1, 2])
+            ]
+
+        seed_one_first = run_batch(1, dr_evt.RunTimeMode.DISTRIBUTION)
+        seed_one_second = run_batch(1, dr_evt.RunTimeMode.DISTRIBUTION)
+        seed_two = run_batch(2, dr_evt.RunTimeMode.DISTRIBUTION)
+        limit_times = run_batch(1, dr_evt.RunTimeMode.LIMIT)
+
+        assert seed_one_first == seed_one_second
+        assert seed_one_first != seed_two
+        assert all(0.0 < run_time <= 100.0
+                   for run_time in seed_one_first + seed_two)
+        assert limit_times == [100.0, 100.0, 100.0]
+        result.record_pass("Seeded run-time distribution and LIMIT mode")
+    except Exception as e:
+        result.record_fail("Run-time distribution", str(e))
+    finally:
+        os.unlink(trace_file.name)
 
 
 def test_streaming_api(result):
@@ -717,6 +858,8 @@ def main():
     test_streaming_example_from_repo_root(result)
     test_enumerations(result)
     test_sim_params(result)
+    test_sim_params_output(result)
+    test_run_time_distribution(result)
     test_streaming_api(result)
     test_monitoring_api(result)
     test_backfill_window_api(result)

@@ -42,6 +42,14 @@ PYBIND11_MODULE(dr_evt, m) {
       .value("LIMIT", RunTimeMode::LIMIT)
       .export_values();
 
+  py::enum_<DistributionType>(
+      m, "DistributionType",
+      "Selects the distribution used for sampled job run times.")
+      .value("NORMAL", DistributionType::NORMAL)
+      .value("LOGNORMAL", DistributionType::LOGNORMAL)
+      .value("UNIFORM", DistributionType::UNIFORM)
+      .export_values();
+
   py::enum_<BackfillPolicy>(
       m, "BackfillPolicy",
       "Selects no backfilling, EASY backfilling, or conservative backfilling.")
@@ -59,7 +67,10 @@ PYBIND11_MODULE(dr_evt, m) {
       .export_values();
 
   // Mutable configuration populated before constructing Simulation.
-  py::class_<Sim_Params>(m, "SimParams")
+  py::class_<Sim_Params>(
+      m, "SimParams",
+      "Set every field before constructing the Simulation; it keeps a "
+      "reference to the parameters object, which must outlive it.")
       .def(py::init<>(), "Creates a configuration with DR_EVT default values.")
       .def_readwrite("infile", &Sim_Params::m_infile,
                      "str: Path to the input trace used by batch mode and "
@@ -81,7 +92,44 @@ PYBIND11_MODULE(dr_evt, m) {
       .def_readwrite("priority_policy", &Sim_Params::m_priority_policy,
                      "PriorityPolicy: Waiting-job ordering policy.")
       .def_readwrite("verbose", &Sim_Params::m_verbose,
-                     "bool: Enables verbose simulator output.");
+                     "bool: Enables verbose simulator output.")
+      .def_readwrite("seed", &Sim_Params::m_seed,
+                     "int: Seed for the run-time sampler, used with "
+                     "RunTimeMode.DISTRIBUTION for trace-loaded jobs; read "
+                     "when the Simulation is constructed.")
+      .def_readwrite("msec_output", &Sim_Params::m_msec_output,
+                     "bool: Emit output timestamps with three decimal places.")
+      .def_readwrite("run_time_scale", &Sim_Params::m_run_time_scale,
+                     "float: Sampler scale as a fraction of time_limit: the "
+                     "NORMAL mean, the LOGNORMAL median and the UNIFORM "
+                     "lower bound are limit times scale.")
+      .def_readwrite("run_time_stddev", &Sim_Params::m_run_time_stddev,
+                     "float: Sampler spread: NORMAL standard deviation is "
+                     "limit times stddev, LOGNORMAL sigma is stddev, "
+                     "UNIFORM upper bound is limit times (scale plus "
+                     "stddev). NORMAL and LOGNORMAL samples are capped at "
+                     "time_limit; UNIFORM is not.")
+      .def_readwrite(
+          "run_time_distribution", &Sim_Params::m_run_time_distribution,
+          "DistributionType: Distribution used for trace-loaded jobs when "
+          "run_time_mode is DISTRIBUTION.")
+      .def_property(
+          "outfile", [](const Sim_Params &params) {
+            return params.get_outfile();
+          },
+          [](Sim_Params &params, const std::string &outfile) {
+            params.set_outfile(outfile);
+          },
+          "str: Simulated-trace output filename. An empty string selects the "
+          "default derived from infile.")
+      .def_property(
+          "resource_trace", [](const Sim_Params &params) {
+            return params.get_resource_trace();
+          },
+          [](Sim_Params &params, const std::string &resource_trace) {
+            params.set_resource_trace(resource_trace);
+          },
+          "str: Optional resource-history output filename.");
 
   // One value passed to Simulation.append_jobs().
   py::class_<Simulation::Job_Append_Request>(m, "JobAppendRequest")
@@ -202,7 +250,8 @@ PYBIND11_MODULE(dr_evt, m) {
   // Main Simulation class
   py::class_<Simulation>(m, "Simulation")
       .def(py::init<const Sim_Params &>(), py::arg("params"),
-           "Create a simulation from SimParams. The configuration is copied.")
+           "Create a simulation from SimParams. The simulation references "
+           "params, which must outlive the Simulation.")
       .def(py::init<const Sim_Params &, job_cost_function_t,
                     backfill_selector_t>(),
            py::arg("params"), py::arg("job_cost_function"),
@@ -311,6 +360,13 @@ PYBIND11_MODULE(dr_evt, m) {
       // Output
       .def("write_simulated_trace", &Simulation::write_simulated_trace,
            "Write the simulated trace to the configured output. Returns None.")
+
+      .def("write_resource_trace", &Simulation::write_resource_trace,
+           py::arg("filename"),
+           "Write the resource-history CSV (time,free_nodes,allocated_nodes) "
+           "to filename. The batch CLI and the gRPC server call this at the "
+           "end of a run; from Python pass params.resource_trace or any "
+           "path.")
 
       .def(
           "print_stats",
