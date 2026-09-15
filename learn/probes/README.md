@@ -16,3 +16,6 @@ python3 learn/probes/probe_composite.py
 - `probe_composite.py`: submitting every fragment of a composite job only when each
   fragment is predicted to start now yields a deterministic simultaneous start under
   EASY; a waiting head on any platform is the signal to defer.
+- `probe_custom_scheduler.py`: the custom FCFS scheduler with an arrival-order cost and a
+  lowest-cost selector reproduces standard EASY exactly, and `get_prediction_horizon()` is
+  an estimate of when the whole waiting queue drains, not of when one job would start.
