@@ -20,6 +20,7 @@ from .platforms.base import (
     SubmitRequest,
     validate,
 )
+from .platforms.inprocess import InProcessPlatform
 
 __version__ = "0.1.0"
 
@@ -28,6 +29,7 @@ __all__ = [
     "ClockViolation",
     "ConfigurationError",
     "InfrastructureFailure",
+    "InProcessPlatform",
     "JobTiming",
     "PlatformReport",
     "PlatformSession",

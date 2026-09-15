@@ -20,11 +20,13 @@ from .base import (
     SubmitRequest,
     validate,
 )
+from .inprocess import InProcessPlatform
 
 __all__ = [
     "ClockViolation",
     "ConfigurationError",
     "InfrastructureFailure",
+    "InProcessPlatform",
     "JobTiming",
     "PlatformReport",
     "PlatformSession",
