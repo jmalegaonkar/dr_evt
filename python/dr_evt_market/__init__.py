@@ -21,6 +21,8 @@ from .platforms.base import (
     validate,
 )
 from .platforms.inprocess import InProcessPlatform
+from .platforms.grpc import GrpcPlatform, SessionClient
+from .platforms.server import ServerProcess
 
 __version__ = "0.1.0"
 
@@ -29,12 +31,15 @@ __all__ = [
     "ClockViolation",
     "ConfigurationError",
     "InfrastructureFailure",
+    "GrpcPlatform",
     "InProcessPlatform",
     "JobTiming",
     "PlatformReport",
     "PlatformSession",
     "PlatformSnapshot",
     "ResourceRelease",
+    "ServerProcess",
+    "SessionClient",
     "StructuralRejection",
     "SubmitRequest",
     "validate",
