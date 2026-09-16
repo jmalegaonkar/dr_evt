@@ -20,6 +20,7 @@ from .base import (
     validate_decisions,
 )
 from .clearing import QueuedJob, build_observation, submit_decisions
+from .vcg import Vcg
 
 __all__ = [
     "Decision",
@@ -32,6 +33,7 @@ __all__ = [
     "Placement",
     "QueuedJob",
     "RejectedDecision",
+    "Vcg",
     "build_observation",
     "submit_decisions",
     "validate_decisions",

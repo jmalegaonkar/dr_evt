@@ -39,8 +39,8 @@ CTest discovers tests enabled by the current build configuration. Optional
 features such as Protobuf, gRPC, MPI, Python bindings, and Catch2 add their
 corresponding tests only when available.
 
-The market package has 23 adapter, mechanism type, clearing, and parity tests;
-run them with
+The market package has 29 adapter, clearing, VCG, and parity tests; run them
+with
 `./tests/run_market_tests.sh` after installing the `grpc` package extra.
 
 ## Expected outputs

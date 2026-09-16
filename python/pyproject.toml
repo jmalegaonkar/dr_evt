@@ -13,6 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 grpc = ["grpcio", "grpcio-tools", "protobuf"]
+mechanisms = ["numpy", "scipy"]
 
 [tool.setuptools]
 package-dir = {"" = "."}
