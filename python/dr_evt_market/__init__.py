@@ -7,6 +7,16 @@
 
 """Public contract for DR_EVT-backed market platform adapters."""
 
+from .controller import (
+    Controller,
+    RejectedJob,
+    RoutedLeg,
+    RoutingInvariantViolation,
+    RunReport,
+    WindowRecord,
+    write_outputs,
+)
+from .inputs import PlatformSpec, read_jobs, read_platforms
 from .platforms.base import (
     ClockViolation,
     ConfigurationError,
@@ -29,6 +39,7 @@ __all__ = [
     "__version__",
     "ClockViolation",
     "ConfigurationError",
+    "Controller",
     "InfrastructureFailure",
     "GrpcPlatform",
     "InProcessPlatform",
@@ -36,9 +47,18 @@ __all__ = [
     "PlatformReport",
     "PlatformSession",
     "PlatformSnapshot",
+    "PlatformSpec",
+    "RejectedJob",
+    "RoutedLeg",
+    "RoutingInvariantViolation",
+    "RunReport",
     "ServerProcess",
     "SessionClient",
     "StructuralRejection",
     "SubmitRequest",
+    "WindowRecord",
+    "read_jobs",
+    "read_platforms",
     "validate",
+    "write_outputs",
 ]
