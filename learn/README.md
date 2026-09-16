@@ -1,6 +1,6 @@
 # learn/: exploring dr_evt as the execution layer of a federated market
 
-Five executed notebooks and two probe scripts written while designing a federated
+Six executed notebooks and three probe scripts written while designing a federated
 market client on top of dr_evt: a controller that owns arrivals and the clock, decides
 which cluster each job goes to and what it pays, and submits it to that cluster's
 `Simulation` through the streaming API, in process or over gRPC. They record what we
@@ -13,6 +13,7 @@ learned about dr_evt itself along the way, with every claim demonstrated by runn
 | `03_client_server.ipynb` | starting `dr_evt_server`, sessions through the generated stubs and `ServerSession`, per-job records from the session CSV, error responses, two sessions as two platforms and a composite job that partial-starts |
 | `04_mini_federation.ipynb` | four platforms with different node counts and speeds, a start-time predictor from the backfill window, two routers, a controller loop, service metrics from records |
 | `05_composite_jobs.ipynb` | dr_evt's composite-fragment format, coordinator protocol and `partial_start` observation, its test oracle, and the one gate that makes partial starts impossible when a single controller submits |
+| `06_market_package.ipynb` | the `dr_evt_market` package that grew out of 02 to 04: one platform in process and over gRPC through the same contract, the error taxonomy, and parity with the `simulator` CLI |
 
 ## Running them
 
@@ -22,7 +23,7 @@ directory:
 
 ```bash
 python3 -m pip install grpcio grpcio-tools protobuf pandas matplotlib jupyter nbconvert
-for nb in 01_repo_tour 02_python_streaming_api 03_client_server 04_mini_federation 05_composite_jobs; do
+for nb in 01_repo_tour 02_python_streaming_api 03_client_server 04_mini_federation 05_composite_jobs 06_market_package; do
   jupyter nbconvert --to notebook --execute --inplace $nb.ipynb
 done
 ```
@@ -37,5 +38,5 @@ the queue input mode, fixture columns and CLI output they show are those of that
 
 ## Probes
 
-`probes/` holds two scripts that settle specific behavioral questions by running the
+`probes/` holds three scripts that settle specific behavioral questions by running the
 installed module; see `probes/README.md`.

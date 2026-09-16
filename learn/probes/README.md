@@ -7,6 +7,7 @@ Each prints its own expectation next to the measured value. They locate the chec
 ```bash
 python3 learn/probes/probe_exclusive.py
 python3 learn/probes/probe_composite.py
+python3 learn/probes/probe_custom_scheduler.py
 ```
 
 - `probe_exclusive.py`: `Simulation.run_until_exclusive` does not advance past an end
