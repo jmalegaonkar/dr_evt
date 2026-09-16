@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "dr_evt_market"
 version = "0.1.0"
 description = "Platform adapters for federated markets over DR_EVT"
-readme = "README.md"
+readme = "dr_evt_market/README.md"
 authors = [{name = "LLNL"}]
 requires-python = ">=3.10"
 dependencies = []
