@@ -17,7 +17,6 @@ from dr_evt_market import (
     JobTiming,
     PlatformReport,
     PlatformSnapshot,
-    ResourceRelease,
     StructuralRejection,
     SubmitRequest,
     validate,
@@ -29,7 +28,6 @@ class ContractDataclassTests(unittest.TestCase):
 
     def test_dataclasses_are_frozen(self) -> None:
         """Every public contract dataclass rejects field assignment."""
-        release = ResourceRelease(time_s=10.0, nodes_released=4)
         timing = JobTiming(
             handle=2,
             key="job-2",
@@ -44,7 +42,6 @@ class ContractDataclassTests(unittest.TestCase):
         values = [
             (SubmitRequest("job-1", 0, 2, 5), "key", "changed"),
             (timing, "begin_s", 4.0),
-            (release, "nodes_released", 8),
             (
                 PlatformSnapshot(
                     name="cluster",
@@ -53,8 +50,6 @@ class ContractDataclassTests(unittest.TestCase):
                     free_nodes=12,
                     in_use_nodes=4,
                     waiting_jobs=0,
-                    shadow_time_s=-1.0,
-                    releases=(release,),
                 ),
                 "time_s",
                 4,

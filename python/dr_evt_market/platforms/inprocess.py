@@ -18,7 +18,6 @@ from .base import (
     JobTiming,
     PlatformReport,
     PlatformSnapshot,
-    ResourceRelease,
     StructuralRejection,
     SubmitRequest,
     validate,
@@ -231,15 +230,7 @@ class InProcessPlatform:
             ) from error
 
     def snapshot(self) -> PlatformSnapshot:
-        """Return capacity, queue, reservation, and optional custom state."""
-        window = self._simulation.get_backfill_window()
-        releases = tuple(
-            ResourceRelease(
-                time_s=float(release.time),
-                nodes_released=int(release.nodes_released),
-            )
-            for release in window.releases
-        )
+        """Return capacity, queue, and optional custom state."""
         current_utilization = float(
             self._simulation.get_current_utilization()
         )
@@ -255,11 +246,9 @@ class InProcessPlatform:
             name=self.name,
             time_s=self.now(),
             total_nodes=self.total_nodes,
-            free_nodes=int(window.available_nodes),
+            free_nodes=int(self._simulation.get_available_nodes()),
             in_use_nodes=int(self._simulation.get_nodes_in_use()),
             waiting_jobs=int(self._simulation.get_active_job_count()),
-            shadow_time_s=float(window.shadow_time),
-            releases=releases,
             current_utilization=current_utilization,
             resource_area=resource_area,
             prediction_horizon_s=prediction_horizon_s,

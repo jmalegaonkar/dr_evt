@@ -23,7 +23,6 @@ from .base import (
     JobTiming,
     PlatformReport,
     PlatformSnapshot,
-    ResourceRelease,
     StructuralRejection,
     SubmitRequest,
     validate,
@@ -327,10 +326,7 @@ class GrpcPlatform:
         ))
 
     def snapshot(self) -> PlatformSnapshot:
-        """Return capacity, queue, and reservation state from the server."""
-        window = self._client.call(self._messages.ClientMessage(
-            get_backfill_window=self._messages.GetBackfillWindowRequest()
-        )).get_backfill_window
+        """Return capacity, queue, and utilization state from the server."""
         statistics = self._client.call(self._messages.ClientMessage(
             get_statistics=self._messages.GetStatisticsRequest()
         )).get_statistics
@@ -339,22 +335,13 @@ class GrpcPlatform:
                 self._messages.GetCurrentUtilizationRequest()
             )
         )).get_current_utilization.utilization
-        releases = tuple(
-            ResourceRelease(
-                time_s=float(release.time),
-                nodes_released=int(release.nodes_released),
-            )
-            for release in window.releases
-        )
         return PlatformSnapshot(
             name=self.name,
-            time_s=int(window.current_time),
+            time_s=int(statistics.current_time),
             total_nodes=self.total_nodes,
-            free_nodes=int(window.available_nodes),
+            free_nodes=int(statistics.nodes_available),
             in_use_nodes=int(statistics.nodes_in_use),
             waiting_jobs=int(statistics.jobs_waiting),
-            shadow_time_s=float(window.shadow_time),
-            releases=releases,
             current_utilization=float(current_utilization),
             # The wire statistic is committed scheduled-job area, not the
             # custom scheduler's live consumed area exposed by this field.

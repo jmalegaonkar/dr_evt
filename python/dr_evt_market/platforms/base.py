@@ -39,19 +39,11 @@ class JobTiming:
 
 
 @dataclass(frozen=True)
-class ResourceRelease:
-    """Describe nodes projected to become available at one time."""
-
-    time_s: float
-    nodes_released: int
-
-
-@dataclass(frozen=True)
 class PlatformSnapshot:
     """Capture common scheduler state and adapter-specific live metrics.
 
-    Both adapters populate current_utilization. Resource area and prediction
-    horizon are available only from the custom in-process scheduler.
+    Both adapters populate current_utilization. Custom scheduler metrics remain
+    optional.
     """
 
     name: str
@@ -60,8 +52,6 @@ class PlatformSnapshot:
     free_nodes: int
     in_use_nodes: int
     waiting_jobs: int
-    shadow_time_s: float
-    releases: tuple[ResourceRelease, ...]
     current_utilization: float | None = None
     resource_area: float | None = None
     prediction_horizon_s: float | None = None

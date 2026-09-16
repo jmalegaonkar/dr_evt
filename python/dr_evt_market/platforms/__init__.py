@@ -15,14 +15,12 @@ from .base import (
     PlatformReport,
     PlatformSession,
     PlatformSnapshot,
-    ResourceRelease,
     StructuralRejection,
     SubmitRequest,
     validate,
 )
 from .inprocess import InProcessPlatform
 from .grpc import GrpcPlatform, SessionClient
-from .prediction import Prediction, predict_start
 from .server import ServerProcess
 
 __all__ = [
@@ -35,12 +33,9 @@ __all__ = [
     "PlatformReport",
     "PlatformSession",
     "PlatformSnapshot",
-    "Prediction",
-    "ResourceRelease",
     "ServerProcess",
     "SessionClient",
     "StructuralRejection",
     "SubmitRequest",
-    "predict_start",
     "validate",
 ]

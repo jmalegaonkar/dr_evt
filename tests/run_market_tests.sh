@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the dr_evt_market adapter and prediction test suite.
+# Run the dr_evt_market adapter test suite.
 
 set -euo pipefail
 
