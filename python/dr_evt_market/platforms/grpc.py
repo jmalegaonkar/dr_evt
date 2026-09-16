@@ -17,6 +17,9 @@ import tempfile
 from typing import Any
 
 from .base import (
+    _DRAIN_TIME_S,
+    _STATISTIC_FIELDS,
+    _is_integer,
     ClockViolation,
     ConfigurationError,
     InfrastructureFailure,
@@ -28,27 +31,7 @@ from .base import (
     validate,
 )
 
-_DRAIN_TIME_S = 1_000_000_000_000
 _SAFE_SESSION_NAME = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
-_STATISTIC_FIELDS = (
-    "jobs_submitted",
-    "jobs_completed",
-    "jobs_running",
-    "jobs_waiting",
-    "current_time",
-    "total_nodes",
-    "nodes_in_use",
-    "nodes_available",
-    "resource_area",
-    "utilization",
-    "avg_wait_time",
-    "avg_turnaround_time",
-    "makespan",
-)
-
-
-def _is_integer(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _proto_path() -> Path:
@@ -71,9 +54,7 @@ def _mapped_server_error(
     message = f"{address}: {server_message}"
     if request_kind == "get_job_timings" and "get_job_timing()" in message:
         return KeyError(message)
-    if "submit_time" in server_message and (
-        "sorted" in server_message or "current" in server_message
-    ):
+    if "submit_time" in server_message and "current" in server_message:
         return ClockViolation(message)
     if (
         server_message.startswith("Unknown ")

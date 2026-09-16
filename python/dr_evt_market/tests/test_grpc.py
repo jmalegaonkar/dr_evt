@@ -12,9 +12,12 @@ import tempfile
 import unittest
 
 from dr_evt_market import (
+    ClockViolation,
     ConfigurationError,
     GrpcPlatform,
+    InfrastructureFailure,
     ServerProcess,
+    StructuralRejection,
     SubmitRequest,
 )
 from dr_evt_market.tests.fixtures import (
@@ -49,7 +52,7 @@ class GrpcPlatformTests(unittest.TestCase):
         )
 
     def test_lifecycle_matches_expected_and_cli(self) -> None:
-        """Remote scheduling and final files match the independent CLI."""
+        """Remote scheduling and final files match the batch-mode CLI."""
         platform = self.make_platform("lifecycle")
         first_handle = platform.submit([CONTENDED_JOBS[0]])[0]
 
@@ -94,18 +97,79 @@ class GrpcPlatformTests(unittest.TestCase):
             "time,free_nodes,allocated_nodes",
         )
 
-    def test_unknown_handle_and_bad_queue_are_typed(self) -> None:
-        """Known remote and local failures use their contract exceptions."""
+    def test_unknown_handle_is_typed(self) -> None:
+        """An unknown remote handle raises a keyed contract exception."""
         platform = self.make_platform("errors")
 
         with self.assertRaisesRegex(KeyError, "99"):
             platform.timings([99])
-        with self.assertRaisesRegex(ConfigurationError, "q_id"):
-            platform.submit([
-                SubmitRequest("bad-queue", 0, 1, 1, q_id="pbatch")
-            ])
-        self.assertEqual(platform.snapshot().waiting_jobs, 0)
         platform.finish()
+
+    def test_guards_do_not_mutate_scheduler_state(self) -> None:
+        """Every invalid request fails before the gRPC append call."""
+        platform = self.make_platform("guards")
+        platform.advance_to(10)
+        invalid_batches = [
+            (
+                ClockViolation,
+                [SubmitRequest("fractional", 10.5, 1, 1)],
+            ),
+            (
+                ClockViolation,
+                [SubmitRequest("past", 9, 1, 1)],
+            ),
+            (
+                ClockViolation,
+                [
+                    SubmitRequest("later", 20, 1, 1),
+                    SubmitRequest("earlier", 15, 1, 1),
+                ],
+            ),
+            (
+                ConfigurationError,
+                [SubmitRequest("queue", 10, 1, 1, q_id="pbatch")],
+            ),
+            (
+                StructuralRejection,
+                [SubmitRequest("oversize", 10, 101, 1)],
+            ),
+            (
+                StructuralRejection,
+                [SubmitRequest("zero-nodes", 10, 0, 1)],
+            ),
+            (
+                StructuralRejection,
+                [SubmitRequest("zero-limit", 10, 1, 0)],
+            ),
+        ]
+
+        for error_type, batch in invalid_batches:
+            with self.subTest(key=batch[0].key):
+                before = platform.snapshot().waiting_jobs
+                with self.assertRaises(error_type):
+                    platform.submit(batch)
+                self.assertEqual(platform.snapshot().waiting_jobs, before)
+
+    def test_finish_closes_adapter_and_caches_report(self) -> None:
+        """Finishing closes operations and returns the cached report again."""
+        platform = self.make_platform("closed")
+        platform.submit([SubmitRequest("job", 0, 1, 1)])
+        report = platform.finish()
+
+        self.assertIs(platform.finish(), report)
+        operations = {
+            "now": platform.now,
+            "submit": lambda: platform.submit([
+                SubmitRequest("late", 0, 1, 1)
+            ]),
+            "advance_to": lambda: platform.advance_to(0),
+            "snapshot": platform.snapshot,
+            "timings": lambda: platform.timings([]),
+        }
+        for name, operation in operations.items():
+            with self.subTest(operation=name):
+                with self.assertRaises(InfrastructureFailure):
+                    operation()
 
 
 if __name__ == "__main__":

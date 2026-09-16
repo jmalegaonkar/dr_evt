@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from .base import (
+    _DRAIN_TIME_S,
+    _STATISTIC_FIELDS,
+    _is_integer,
     ClockViolation,
     ConfigurationError,
     InfrastructureFailure,
@@ -23,26 +26,7 @@ from .base import (
     validate,
 )
 
-_DRAIN_TIME_S = 1_000_000_000_000
-_STATISTIC_FIELDS = (
-    "jobs_submitted",
-    "jobs_completed",
-    "jobs_running",
-    "jobs_waiting",
-    "current_time",
-    "total_nodes",
-    "nodes_in_use",
-    "nodes_available",
-    "resource_area",
-    "utilization",
-    "avg_wait_time",
-    "avg_turnaround_time",
-    "makespan",
-)
-
-
-def _is_integer(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+_DR_EVT_ERRORS = (RuntimeError, ValueError)
 
 
 class InProcessPlatform:
@@ -96,26 +80,25 @@ class InProcessPlatform:
                 f"cannot write platform header {self._header_path}"
             ) from error
 
-        params = dr_evt.SimParams()
-        params.infile = str(self._header_path)
-        params.total_nodes = total_nodes
-        params.trace_format = "simple"
-        params.timestamp_format = "epoch"
-        params.run_time_mode = dr_evt.RunTimeMode.LIMIT
-        params.backfill_policy = dr_evt.BackfillPolicy.EASY
-        params.priority_policy = dr_evt.PriorityPolicy.FCFS
-        params.msec_output = True
-        params.outfile = str(self._simulated_trace_path)
-        params.resource_trace = str(self._resource_trace_path)
-
-        self._params = params
         try:
+            params = dr_evt.SimParams()
+            params.infile = str(self._header_path)
+            params.total_nodes = total_nodes
+            params.trace_format = "simple"
+            params.timestamp_format = "epoch"
+            params.run_time_mode = dr_evt.RunTimeMode.LIMIT
+            params.backfill_policy = dr_evt.BackfillPolicy.EASY
+            params.priority_policy = dr_evt.PriorityPolicy.FCFS
+            params.msec_output = True
+            params.outfile = str(self._simulated_trace_path)
+            params.resource_trace = str(self._resource_trace_path)
             self._simulation = dr_evt.Simulation(params)
-        except (RuntimeError, ValueError) as error:
+        except _DR_EVT_ERRORS as error:
             raise InfrastructureFailure(
                 f"cannot initialize platform {name}: {error}"
             ) from error
 
+        self._params = params
         self._dr_evt: Any = dr_evt
         self._ledger: dict[int, str] = {}
         self._handles: list[int] = []
@@ -124,10 +107,23 @@ class InProcessPlatform:
 
     def now(self) -> int:
         """Return the platform's current integer simulation time."""
-        return int(self._simulation.get_current_time())
+        self._ensure_open()
+        try:
+            return int(self._simulation.get_current_time())
+        except _DR_EVT_ERRORS as error:
+            raise InfrastructureFailure(
+                f"cannot read platform {self.name!r} time: {error}"
+            ) from error
+
+    def _ensure_open(self) -> None:
+        if self._report is not None:
+            raise InfrastructureFailure(
+                f"platform {self.name!r} is finished"
+            )
 
     def submit(self, jobs: Sequence[SubmitRequest]) -> list[int]:
         """Validate and append one chronologically ordered request batch."""
+        self._ensure_open()
         requests = list(jobs)
         previous_submit = self._last_submit_s
         current_time = self.now()
@@ -154,21 +150,21 @@ class InProcessPlatform:
         if not requests:
             return []
 
-        append_requests = [
-            self._dr_evt.JobAppendRequest(
-                request.submit_s,
-                request.num_nodes,
-                request.q_id,
-                request.limit_s,
-            )
-            for request in requests
-        ]
         try:
+            append_requests = [
+                self._dr_evt.JobAppendRequest(
+                    request.submit_s,
+                    request.num_nodes,
+                    request.q_id,
+                    request.limit_s,
+                )
+                for request in requests
+            ]
             handles = [
                 int(handle)
                 for handle in self._simulation.append_jobs(append_requests)
             ]
-        except (RuntimeError, ValueError) as error:
+        except _DR_EVT_ERRORS as error:
             raise InfrastructureFailure(
                 f"platform {self.name!r} rejected an append batch: {error}"
             ) from error
@@ -186,6 +182,7 @@ class InProcessPlatform:
 
     def advance_to(self, time_s: int) -> None:
         """Advance through events at time_s after enforcing a monotone clock."""
+        self._ensure_open()
         if not _is_integer(time_s):
             raise ClockViolation("advance time must be an integer number of seconds")
         current_time = self.now()
@@ -196,27 +193,34 @@ class InProcessPlatform:
             )
         try:
             self._simulation.advance_to(time_s)
-        except RuntimeError as error:
+        except _DR_EVT_ERRORS as error:
             raise InfrastructureFailure(
                 f"cannot advance platform {self.name!r}: {error}"
             ) from error
 
     def snapshot(self) -> PlatformSnapshot:
         """Return capacity, queue, and utilization state."""
-        return PlatformSnapshot(
-            name=self.name,
-            time_s=self.now(),
-            total_nodes=self.total_nodes,
-            free_nodes=int(self._simulation.get_available_nodes()),
-            in_use_nodes=int(self._simulation.get_nodes_in_use()),
-            waiting_jobs=int(self._simulation.get_active_job_count()),
-            current_utilization=float(
-                self._simulation.get_current_utilization()
-            ),
-        )
+        self._ensure_open()
+        try:
+            return PlatformSnapshot(
+                name=self.name,
+                time_s=self.now(),
+                total_nodes=self.total_nodes,
+                free_nodes=int(self._simulation.get_available_nodes()),
+                in_use_nodes=int(self._simulation.get_nodes_in_use()),
+                waiting_jobs=int(self._simulation.get_active_job_count()),
+                current_utilization=float(
+                    self._simulation.get_current_utilization()
+                ),
+            )
+        except _DR_EVT_ERRORS as error:
+            raise InfrastructureFailure(
+                f"cannot snapshot platform {self.name!r}: {error}"
+            ) from error
 
     def timings(self, handles: Sequence[int]) -> list[JobTiming]:
         """Return adapter timing values, preserving requested handle order."""
+        self._ensure_open()
         requested = list(handles)
         for handle in requested:
             if handle not in self._ledger:
@@ -225,10 +229,9 @@ class InProcessPlatform:
                 )
         try:
             raw_timings = self._simulation.get_job_timings(requested)
-        except IndexError as error:
-            raise KeyError(
-                f"platform {self.name!r} has an unavailable job handle: "
-                f"{error}"
+        except _DR_EVT_ERRORS as error:
+            raise InfrastructureFailure(
+                f"cannot read timings from platform {self.name!r}: {error}"
             ) from error
 
         return [
@@ -259,7 +262,7 @@ class InProcessPlatform:
                 str(self._resource_trace_path)
             )
             raw_statistics = self._simulation.get_statistics()
-        except RuntimeError as error:
+        except _DR_EVT_ERRORS as error:
             raise InfrastructureFailure(
                 f"cannot finish platform {self.name!r}: {error}"
             ) from error

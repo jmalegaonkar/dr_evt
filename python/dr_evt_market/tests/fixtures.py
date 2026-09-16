@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Shared schedules and independent CLI oracle helpers for adapter tests."""
+"""Shared schedules and batch-mode CLI oracle helpers for adapter tests."""
 
 from collections.abc import Sequence
 import csv
@@ -28,6 +28,8 @@ CONTENDED_JOBS = tuple(
     ))
 )
 
+# From DR_EVT's python/examples/sample_trace.csv under EASY and FCFS, walked
+# by hand in learn/01_repo_tour.ipynb.
 EXPECTED_BEGIN_TIMES = (0, 10, 20, 160, 160, 50, 260, 410, 260, 630)
 
 
@@ -54,7 +56,7 @@ def cli_schedule(
     work_dir: str | Path,
     jobs: Sequence[SubmitRequest],
 ) -> list[dict[str, str]]:
-    """Run the independent simulator CLI and return its schedule rows."""
+    """Run the batch-mode simulator CLI and return its schedule rows."""
     directory = Path(work_dir).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     input_path = directory / "cli.input.csv"

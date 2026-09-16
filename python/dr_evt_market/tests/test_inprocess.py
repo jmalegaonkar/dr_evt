@@ -15,6 +15,7 @@ from dr_evt_market import (
     ClockViolation,
     ConfigurationError,
     InProcessPlatform,
+    InfrastructureFailure,
     StructuralRejection,
     SubmitRequest,
 )
@@ -56,7 +57,7 @@ class InProcessPlatformTests(unittest.TestCase):
         return tuple(platform.timings(handles))
 
     def test_lifecycle_matches_expected_and_cli(self) -> None:
-        """Append, advance, and timing records match the independent CLI."""
+        """Append, advance, and timing records match the batch-mode CLI."""
         platform = self.make_platform("lifecycle")
         first_handle = platform.submit([CONTENDED_JOBS[0]])[0]
 
@@ -180,6 +181,27 @@ class InProcessPlatformTests(unittest.TestCase):
             resource_path.read_text(encoding="utf-8").splitlines()[0],
             "time,free_nodes,allocated_nodes",
         )
+
+    def test_finish_closes_adapter_and_caches_report(self) -> None:
+        """Finishing closes operations and returns the cached report again."""
+        platform = self.make_platform("closed")
+        platform.submit([SubmitRequest("job", 0, 1, 1)])
+        report = platform.finish()
+
+        self.assertIs(platform.finish(), report)
+        operations = {
+            "now": platform.now,
+            "submit": lambda: platform.submit([
+                SubmitRequest("late", 0, 1, 1)
+            ]),
+            "advance_to": lambda: platform.advance_to(0),
+            "snapshot": platform.snapshot,
+            "timings": lambda: platform.timings([]),
+        }
+        for name, operation in operations.items():
+            with self.subTest(operation=name):
+                with self.assertRaises(InfrastructureFailure):
+                    operation()
 
     def test_two_adapters_are_deterministic(self) -> None:
         """Independent adapters produce identical records for one stream."""

@@ -61,7 +61,7 @@ Both adapters implement these methods:
 | `advance_to(time_s)` | Process all scheduler events at or before `time_s`. |
 | `snapshot()` | Return current capacity, queue, and live metrics. |
 | `timings(handles)` | Return timing records in request order. |
-| `finish()` | Drain work, write both traces, and return a cached final report. |
+| `finish()` | Drain work, write traces, close the adapter, and cache its report. |
 
 The adapters reject malformed requests before appending any part of a batch:
 
@@ -72,6 +72,8 @@ The adapters reject malformed requests before appending any part of a batch:
 - `InfrastructureFailure` covers process, stream, file, and server failures.
 
 An unknown or unavailable timing handle raises `KeyError` naming the handle.
+After `finish()`, every method except `finish()` raises
+`InfrastructureFailure`.
 
 ## In-process adapter
 

@@ -11,6 +11,23 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+_DRAIN_TIME_S = 1_000_000_000_000
+_STATISTIC_FIELDS = (
+    "jobs_submitted",
+    "jobs_completed",
+    "jobs_running",
+    "jobs_waiting",
+    "current_time",
+    "total_nodes",
+    "nodes_in_use",
+    "nodes_available",
+    "resource_area",
+    "utilization",
+    "avg_wait_time",
+    "avg_turnaround_time",
+    "makespan",
+)
+
 
 @dataclass(frozen=True)
 class SubmitRequest:
