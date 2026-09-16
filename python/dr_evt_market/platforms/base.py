@@ -48,7 +48,11 @@ class ResourceRelease:
 
 @dataclass(frozen=True)
 class PlatformSnapshot:
-    """Capture scheduler capacity and reservation state at one time."""
+    """Capture common scheduler state and adapter-specific live metrics.
+
+    Both adapters populate current_utilization. Resource area and prediction
+    horizon are available only from the custom in-process scheduler.
+    """
 
     name: str
     time_s: int

@@ -148,19 +148,21 @@ class InProcessPlatformTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             InProcessPlatform("bad", 100, self.work_dir, backfill="unknown")
 
-    def test_custom_snapshot_fields_are_optional(self) -> None:
-        """Only the callback scheduler exposes its three live metrics."""
+    def test_snapshot_field_availability(self) -> None:
+        """Both schedulers expose utilization and only custom adds metrics."""
         custom = self.make_platform("custom")
         custom.submit([SubmitRequest("job", 0, 30, 10)])
         custom.advance_to(0)
         custom_snapshot = custom.snapshot()
-        self.assertIsNotNone(custom_snapshot.current_utilization)
+        self.assertEqual(custom_snapshot.current_utilization, 0.3)
         self.assertIsNotNone(custom_snapshot.resource_area)
         self.assertIsNotNone(custom_snapshot.prediction_horizon_s)
 
         plain = self.make_platform("plain", use_custom_scheduler=False)
+        plain.submit([SubmitRequest("job", 0, 30, 10)])
+        plain.advance_to(0)
         plain_snapshot = plain.snapshot()
-        self.assertIsNone(plain_snapshot.current_utilization)
+        self.assertEqual(plain_snapshot.current_utilization, 0.3)
         self.assertIsNone(plain_snapshot.resource_area)
         self.assertIsNone(plain_snapshot.prediction_horizon_s)
 

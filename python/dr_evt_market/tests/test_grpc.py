@@ -56,13 +56,15 @@ class GrpcPlatformTests(unittest.TestCase):
         queued = platform.snapshot()
         self.assertEqual(queued.waiting_jobs, 1)
         self.assertEqual(queued.free_nodes, 100)
-        self.assertIsNone(queued.current_utilization)
+        self.assertEqual(queued.current_utilization, 0.0)
         self.assertIsNone(queued.resource_area)
         self.assertIsNone(queued.prediction_horizon_s)
         self.assertFalse(platform.timings([first_handle])[0].scheduled)
 
         platform.advance_to(0)
-        self.assertEqual(platform.snapshot().in_use_nodes, 20)
+        running = platform.snapshot()
+        self.assertEqual(running.in_use_nodes, 20)
+        self.assertEqual(running.current_utilization, 0.2)
 
         handles = [first_handle]
         for job in CONTENDED_JOBS[1:]:

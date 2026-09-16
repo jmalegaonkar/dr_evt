@@ -240,13 +240,12 @@ class InProcessPlatform:
             )
             for release in window.releases
         )
-        current_utilization = None
+        current_utilization = float(
+            self._simulation.get_current_utilization()
+        )
         resource_area = None
         prediction_horizon_s = None
         if self._uses_custom_scheduler:
-            current_utilization = float(
-                self._simulation.get_current_utilization()
-            )
             resource_area = float(self._simulation.get_resource_area())
             prediction_horizon_s = float(
                 self._simulation.get_prediction_horizon(1.0)

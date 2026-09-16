@@ -334,6 +334,11 @@ class GrpcPlatform:
         statistics = self._client.call(self._messages.ClientMessage(
             get_statistics=self._messages.GetStatisticsRequest()
         )).get_statistics
+        current_utilization = self._client.call(self._messages.ClientMessage(
+            get_current_utilization=(
+                self._messages.GetCurrentUtilizationRequest()
+            )
+        )).get_current_utilization.utilization
         releases = tuple(
             ResourceRelease(
                 time_s=float(release.time),
@@ -350,6 +355,10 @@ class GrpcPlatform:
             waiting_jobs=int(statistics.jobs_waiting),
             shadow_time_s=float(window.shadow_time),
             releases=releases,
+            current_utilization=float(current_utilization),
+            # The wire statistic is committed scheduled-job area, not the
+            # custom scheduler's live consumed area exposed by this field.
+            resource_area=None,
         )
 
     def timings(self, handles: Sequence[int]) -> list[JobTiming]:
