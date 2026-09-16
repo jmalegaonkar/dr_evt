@@ -1,5 +1,0 @@
-
-[grpc]
-grpcio
-grpcio-tools
-protobuf
