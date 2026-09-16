@@ -36,18 +36,12 @@ class InProcessPlatformTests(unittest.TestCase):
         self.addCleanup(self._temporary_directory.cleanup)
         self.work_dir = Path(self._temporary_directory.name)
 
-    def make_platform(
-        self,
-        name: str,
-        *,
-        use_custom_scheduler: bool = True,
-    ) -> InProcessPlatform:
+    def make_platform(self, name: str) -> InProcessPlatform:
         """Construct a 100-node adapter in a test-specific directory."""
         return InProcessPlatform(
             name,
             100,
             self.work_dir / name,
-            use_custom_scheduler=use_custom_scheduler,
         )
 
     @staticmethod
@@ -149,22 +143,18 @@ class InProcessPlatformTests(unittest.TestCase):
             InProcessPlatform("bad", 100, self.work_dir, backfill="unknown")
 
     def test_snapshot_field_availability(self) -> None:
-        """Both schedulers expose utilization and only custom adds metrics."""
-        custom = self.make_platform("custom")
-        custom.submit([SubmitRequest("job", 0, 30, 10)])
-        custom.advance_to(0)
-        custom_snapshot = custom.snapshot()
-        self.assertEqual(custom_snapshot.current_utilization, 0.3)
-        self.assertIsNotNone(custom_snapshot.resource_area)
-        self.assertIsNotNone(custom_snapshot.prediction_horizon_s)
+        """The standard scheduler reports every common snapshot field."""
+        platform = self.make_platform("snapshot")
+        platform.submit([SubmitRequest("job", 0, 30, 10)])
+        platform.advance_to(0)
+        snapshot = platform.snapshot()
 
-        plain = self.make_platform("plain", use_custom_scheduler=False)
-        plain.submit([SubmitRequest("job", 0, 30, 10)])
-        plain.advance_to(0)
-        plain_snapshot = plain.snapshot()
-        self.assertEqual(plain_snapshot.current_utilization, 0.3)
-        self.assertIsNone(plain_snapshot.resource_area)
-        self.assertIsNone(plain_snapshot.prediction_horizon_s)
+        self.assertEqual(snapshot.time_s, 0)
+        self.assertEqual(snapshot.total_nodes, 100)
+        self.assertEqual(snapshot.free_nodes, 70)
+        self.assertEqual(snapshot.in_use_nodes, 30)
+        self.assertEqual(snapshot.waiting_jobs, 0)
+        self.assertEqual(snapshot.current_utilization, 0.3)
 
     def test_finish_writes_both_trace_files(self) -> None:
         """Finishing drains jobs and materializes schedule and resource CSVs."""

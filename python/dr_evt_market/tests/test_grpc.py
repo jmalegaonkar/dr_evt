@@ -57,8 +57,6 @@ class GrpcPlatformTests(unittest.TestCase):
         self.assertEqual(queued.waiting_jobs, 1)
         self.assertEqual(queued.free_nodes, 100)
         self.assertEqual(queued.current_utilization, 0.0)
-        self.assertIsNone(queued.resource_area)
-        self.assertIsNone(queued.prediction_horizon_s)
         self.assertFalse(platform.timings([first_handle])[0].scheduled)
 
         platform.advance_to(0)

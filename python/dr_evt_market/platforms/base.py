@@ -40,11 +40,7 @@ class JobTiming:
 
 @dataclass(frozen=True)
 class PlatformSnapshot:
-    """Capture common scheduler state and adapter-specific live metrics.
-
-    Both adapters populate current_utilization. Custom scheduler metrics remain
-    optional.
-    """
+    """Capture common scheduler capacity, queue, and utilization state."""
 
     name: str
     time_s: int
@@ -53,8 +49,6 @@ class PlatformSnapshot:
     in_use_nodes: int
     waiting_jobs: int
     current_utilization: float | None = None
-    resource_area: float | None = None
-    prediction_horizon_s: float | None = None
 
 
 @dataclass(frozen=True)

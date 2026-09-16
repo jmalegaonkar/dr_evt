@@ -343,9 +343,6 @@ class GrpcPlatform:
             in_use_nodes=int(statistics.nodes_in_use),
             waiting_jobs=int(statistics.jobs_waiting),
             current_utilization=float(current_utilization),
-            # The wire statistic is committed scheduled-job area, not the
-            # custom scheduler's live consumed area exposed by this field.
-            resource_area=None,
         )
 
     def timings(self, handles: Sequence[int]) -> list[JobTiming]:

@@ -41,22 +41,6 @@ _STATISTIC_FIELDS = (
 )
 
 
-def _arrival_order_cost(
-    job_id: int,
-    submit_time: float,
-    run_time: float,
-    nodes: int,
-) -> int:
-    del submit_time, run_time, nodes
-    return int(job_id)
-
-
-def _lowest_cost(candidates: Sequence[tuple[int, int]]) -> int | None:
-    if not candidates:
-        return None
-    return min(candidates, key=lambda candidate: candidate[1])[0]
-
-
 def _is_integer(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -71,7 +55,6 @@ class InProcessPlatform:
         work_dir: str | Path,
         *,
         backfill: str = "easy",
-        use_custom_scheduler: bool = True,
     ) -> None:
         """Create an EASY/FCFS platform and its output files."""
         if not isinstance(name, str) or not name:
@@ -80,8 +63,6 @@ class InProcessPlatform:
             raise ConfigurationError("total_nodes must be a positive integer")
         if backfill != "easy":
             raise ConfigurationError("backfill must be 'easy'")
-        if not isinstance(use_custom_scheduler, bool):
-            raise ConfigurationError("use_custom_scheduler must be a bool")
 
         try:
             import dr_evt
@@ -128,17 +109,8 @@ class InProcessPlatform:
         params.resource_trace = str(self._resource_trace_path)
 
         self._params = params
-        self._uses_custom_scheduler = use_custom_scheduler
         try:
-            if use_custom_scheduler:
-                params.num_max_candidates = 64
-                self._simulation = dr_evt.Simulation(
-                    params,
-                    _arrival_order_cost,
-                    _lowest_cost,
-                )
-            else:
-                self._simulation = dr_evt.Simulation(params)
+            self._simulation = dr_evt.Simulation(params)
         except (RuntimeError, ValueError) as error:
             raise InfrastructureFailure(
                 f"cannot initialize platform {name}: {error}"
@@ -230,18 +202,7 @@ class InProcessPlatform:
             ) from error
 
     def snapshot(self) -> PlatformSnapshot:
-        """Return capacity, queue, and optional custom state."""
-        current_utilization = float(
-            self._simulation.get_current_utilization()
-        )
-        resource_area = None
-        prediction_horizon_s = None
-        if self._uses_custom_scheduler:
-            resource_area = float(self._simulation.get_resource_area())
-            prediction_horizon_s = float(
-                self._simulation.get_prediction_horizon(1.0)
-            )
-
+        """Return capacity, queue, and utilization state."""
         return PlatformSnapshot(
             name=self.name,
             time_s=self.now(),
@@ -249,9 +210,9 @@ class InProcessPlatform:
             free_nodes=int(self._simulation.get_available_nodes()),
             in_use_nodes=int(self._simulation.get_nodes_in_use()),
             waiting_jobs=int(self._simulation.get_active_job_count()),
-            current_utilization=current_utilization,
-            resource_area=resource_area,
-            prediction_horizon_s=prediction_horizon_s,
+            current_utilization=float(
+                self._simulation.get_current_utilization()
+            ),
         )
 
     def timings(self, handles: Sequence[int]) -> list[JobTiming]:

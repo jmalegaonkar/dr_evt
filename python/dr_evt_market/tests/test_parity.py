@@ -51,7 +51,6 @@ class AdapterParityTests(unittest.TestCase):
                     "in-process",
                     100,
                     root / "in-process",
-                    use_custom_scheduler=False,
                 )
                 remote = GrpcPlatform(
                     "grpc",

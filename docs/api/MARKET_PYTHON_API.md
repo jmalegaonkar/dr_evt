@@ -43,7 +43,7 @@ and advance describes a queue the scheduler has not evaluated yet.
 
 | Type | Purpose |
 |---|---|
-| `SubmitRequest` | Client key, submission time, node demand, time limit, and numeric queue ID. |
+| `SubmitRequest` | Client key, submit time, node demand, limit, and queue ID. |
 | `JobTiming` | Submitted job handle and key with observed or projected timing fields. |
 | `PlatformSnapshot` | Capacity, queue, and live metric state. |
 | `PlatformReport` | Final timings, statistics, and output trace paths. |
@@ -75,14 +75,10 @@ An unknown or unavailable timing handle raises `KeyError` naming the handle.
 
 ## In-process adapter
 
-`InProcessPlatform(name, total_nodes, work_dir, *, backfill="easy",
-use_custom_scheduler=True)` owns a `dr_evt.SimParams` and `Simulation` for its
-whole lifetime. It runs LIMIT mode with EASY and FCFS scheduling.
-
-The default custom scheduler preserves FCFS order and exposes `resource_area`
-in snapshots. Set `use_custom_scheduler=False` to use DR_EVT's standard
-scheduler; that field is then `None`. Both modes populate instantaneous
-`current_utilization`.
+`InProcessPlatform(name, total_nodes, work_dir, *, backfill="easy")` owns a
+`dr_evt.SimParams` and standard `Simulation` for its whole lifetime. It runs
+LIMIT mode with EASY backfill and FCFS priority. The `backfill` argument accepts
+only `"easy"` today. Snapshots populate instantaneous `current_utilization`.
 
 ## gRPC adapter and local server
 
@@ -98,10 +94,7 @@ to the client when it needs to read returned output paths.
 for the gRPC channel before returning. Server output is written to
 `work_dir/server.log`.
 
-gRPC snapshots populate `current_utilization`, but leave `resource_area` as
-`None`. The wire statistics resource area is committed scheduled-job area,
-while the custom in-process snapshot field is live consumed area, so they are
-not interchangeable.
+gRPC snapshots populate instantaneous `current_utilization`.
 
 `SessionClient` is the lower-level correlated request wrapper. Most callers
 should use `GrpcPlatform` instead.
