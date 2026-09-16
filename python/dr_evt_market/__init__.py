@@ -22,6 +22,7 @@ from .platforms.base import (
 )
 from .platforms.inprocess import InProcessPlatform
 from .platforms.grpc import GrpcPlatform, SessionClient
+from .platforms.prediction import Prediction, predict_start
 from .platforms.server import ServerProcess
 
 __version__ = "0.1.0"
@@ -37,10 +38,12 @@ __all__ = [
     "PlatformReport",
     "PlatformSession",
     "PlatformSnapshot",
+    "Prediction",
     "ResourceRelease",
     "ServerProcess",
     "SessionClient",
     "StructuralRejection",
     "SubmitRequest",
+    "predict_start",
     "validate",
 ]

@@ -131,7 +131,11 @@ class PlatformSession(Protocol):
         ...
 
     def snapshot(self) -> PlatformSnapshot:
-        """Return one consistent snapshot of current scheduler state."""
+        """Return one consistent snapshot of current scheduler state.
+
+        Call after advance_to(); between submit and advance the queue has not
+        yet been evaluated by the scheduler.
+        """
         ...
 
     def timings(self, handles: Sequence[int]) -> list[JobTiming]:
