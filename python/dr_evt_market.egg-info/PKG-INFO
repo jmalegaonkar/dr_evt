@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: dr_evt_market
+Version: 0.1.0
+Summary: Platform adapters for federated markets over DR_EVT
+Author: LLNL
+Author-email: 
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+Provides-Extra: grpc
+Requires-Dist: grpcio; extra == "grpc"
+Requires-Dist: grpcio-tools; extra == "grpc"
+Requires-Dist: protobuf; extra == "grpc"
+Dynamic: requires-python
+
+# DR_EVT Python Bindings
+
+The Python package provides in-process access to DR_EVT batch and streaming
+simulation.
+
+Build instructions, supported parameters, methods, examples, and limitations
+are maintained in the [Python API documentation](../docs/api/PYTHON_API.md).
+
+The runnable streaming example is `example_streaming.py`; binding definitions
+are in `dr_evt_bindings.cpp`.

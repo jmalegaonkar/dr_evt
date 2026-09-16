@@ -73,7 +73,8 @@ or are reported as skipped.
 | Append-job | 22 | `run_append_job_tests.sh` | 19 in-process C++ checks plus 3 optional gRPC checks |
 | Progressive loading | 15 | `run_progressive_load_tests.sh` | 11 C++ checks plus 4 CLI checks for multi-file loading, bounded storage, and memory checks |
 | Protobuf configuration | 9 | `run_configs_tests.sh` | Configuration/CLI parity and documented examples |
-| Python API | 17 | `run_python_tests.sh` | Bindings, callbacks, streaming, monitoring, and policy APIs |
+| Python API | 27 | `run_python_tests.sh` | Bindings, callbacks, streaming, monitoring, and policy APIs |
+| Market package | 23 | `run_market_tests.sh` | In-process and gRPC adapters, parity, validation, and start prediction |
 | gRPC client/server | 2 | `run_grpc_tests.sh` | Single-pair and optional MPI multi-server behavior |
 | Backfill-window gRPC | 3 repeated checks | `run_backfill_window_grpc_test.sh` | Focused rerun of the gRPC streaming binary; one check targets the backfill window |
 | Single-coordinator gRPC | 1 | `test_grpc_single_coordinator.py` | Synchronized independent simulation servers |
