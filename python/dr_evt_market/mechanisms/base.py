@@ -238,6 +238,7 @@ class MarketObservation:
     jobs: tuple[JobOffer, ...]
     bids: Mapping[str, JobBid]
     free_nodes: Mapping[str, int]
+    truncated_jobs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.time_s, int) or isinstance(self.time_s, bool):
@@ -252,8 +253,14 @@ class MarketObservation:
             raise ValueError("seed must be an integer")
 
         jobs = tuple(self.jobs)
+        truncated_jobs = tuple(self.truncated_jobs)
         if len({job.job_id for job in jobs}) != len(jobs):
             raise ValueError("observation job IDs must be unique")
+        known_job_ids = {job.job_id for job in jobs}
+        if len(set(truncated_jobs)) != len(truncated_jobs):
+            raise ValueError("truncated job IDs must be unique")
+        if any(job_id not in known_job_ids for job_id in truncated_jobs):
+            raise ValueError("truncated job IDs must name observed jobs")
         bids = dict(sorted(self.bids.items()))
         for job in jobs:
             bid = bids.get(job.job_id)
@@ -281,6 +288,7 @@ class MarketObservation:
             free_nodes[platform] = nodes
 
         object.__setattr__(self, "jobs", jobs)
+        object.__setattr__(self, "truncated_jobs", truncated_jobs)
         object.__setattr__(self, "bids", MappingProxyType(bids))
         object.__setattr__(
             self,

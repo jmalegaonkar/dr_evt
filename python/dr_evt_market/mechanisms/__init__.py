@@ -19,6 +19,7 @@ from .base import (
     RejectedDecision,
     validate_decisions,
 )
+from .clearing import QueuedJob, build_observation, submit_decisions
 
 __all__ = [
     "Decision",
@@ -29,6 +30,9 @@ __all__ = [
     "MarketObservation",
     "Mechanism",
     "Placement",
+    "QueuedJob",
     "RejectedDecision",
+    "build_observation",
+    "submit_decisions",
     "validate_decisions",
 ]
