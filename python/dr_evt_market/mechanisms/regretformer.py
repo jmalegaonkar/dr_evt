@@ -23,12 +23,6 @@ from .base import Decision, MarketObservation, Mechanism
 class RegretFormer(Mechanism):
     """Deploy a seeded or checkpointed RegretFormer network."""
 
-    import torch as _torch
-
-    from ..learned import deploy as _deploy
-    from ..learned import net as _net
-    from ..learned import windows as _windows
-
     name = "regretformer"
 
     def __init__(
@@ -43,6 +37,14 @@ class RegretFormer(Mechanism):
         device: str = "cpu",
     ) -> None:
         """Build a seeded network or load its architecture and parameters."""
+        import torch
+
+        from ..learned import deploy, net, windows
+
+        self._torch = torch
+        self._deploy = deploy
+        self._net = net
+        self._windows = windows
         if not isinstance(seed, int) or isinstance(seed, bool):
             raise ValueError("seed must be an integer")
         self.seed = seed
