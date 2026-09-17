@@ -33,8 +33,19 @@ __all__ = [
     "Placement",
     "QueuedJob",
     "RejectedDecision",
+    "RegretFormer",
     "Vcg",
     "build_observation",
     "submit_decisions",
     "validate_decisions",
 ]
+
+
+def __getattr__(name: str):
+    """Load torch-dependent mechanism classes only when requested."""
+    if name == "RegretFormer":
+        from .regretformer import RegretFormer
+
+        globals()[name] = RegretFormer
+        return RegretFormer
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
