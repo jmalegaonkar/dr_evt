@@ -112,6 +112,7 @@ class Controller:
         *,
         window_s: int,
         seed: int = 0,
+        log_dir: str | Path | None = None,
     ) -> None:
         """Validate and retain one complete market run configuration."""
         if not platforms:
@@ -160,6 +161,7 @@ class Controller:
         self.mechanism = mechanism
         self.window_s = window_s
         self.seed = seed
+        self.log_dir = Path(log_dir).resolve() if log_dir is not None else None
         self._report: RunReport | None = None
 
     def _intake_reason(self, job: QueuedJob) -> str | None:
@@ -249,6 +251,8 @@ class Controller:
                 snapshots,
                 self.prices,
             )
+            if self.log_dir is not None:
+                _write_observation(self.log_dir, observation)
             decisions = self.mechanism.decide(observation)
             accepted, rejected_decisions = validate_decisions(
                 observation,
@@ -423,6 +427,51 @@ class Controller:
                 _integer_time(timing.end_s, "end_s"),
             ))
         return routed
+
+
+def _write_observation(directory: Path, obs: MarketObservation) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "time_s": obs.time_s,
+        "window_index": obs.window_index,
+        "seed": obs.seed,
+        "free_nodes": dict(obs.free_nodes),
+        "truncated_jobs": list(obs.truncated_jobs),
+        "jobs": [],
+    }
+    for offer in obs.jobs:
+        bid_by_leg = {leg.leg_id: leg for leg in obs.bids[offer.job_id].legs}
+        payload["jobs"].append({
+            "job_id": offer.job_id,
+            "submit_s": offer.submit_s,
+            "legs": [
+                {
+                    "leg_id": leg.leg_id,
+                    "num_nodes": leg.num_nodes,
+                    "limit_s": leg.limit_s,
+                    "value_by_platform": dict(
+                        bid_by_leg[leg.leg_id].value_by_platform
+                    ),
+                }
+                for leg in offer.legs
+            ],
+            "candidates": [
+                {
+                    "placement_id": candidate.placement_id,
+                    "platform_by_leg": dict(candidate.platform_by_leg),
+                    "demand_by_platform": dict(candidate.demand_by_platform),
+                    "resource_cost_credits": (
+                        candidate.resource_cost_credits
+                    ),
+                }
+                for candidate in offer.candidates
+            ],
+        })
+    path = directory / f"observation_{obs.window_index:06d}.json"
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _integer_time(value: float, field_name: str) -> int:

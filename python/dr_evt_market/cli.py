@@ -34,6 +34,12 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, default=0)
     run.add_argument("--server-binary", type=Path)
     run.add_argument("--start-servers", action="store_true")
+    run.add_argument("--log-windows", action="store_true")
+    train = commands.add_parser("train", help="train a RegretFormer checkpoint")
+    train.add_argument("--windows", required=True)
+    train.add_argument("--out", required=True, type=Path)
+    train.add_argument("--epochs", type=int, default=20)
+    train.add_argument("--seed", type=int, default=0)
     return parser
 
 
@@ -100,6 +106,7 @@ def _run(args: argparse.Namespace) -> int:
             bids,
             window_s=args.window,
             seed=args.seed,
+            log_dir=out_dir if args.log_windows else None,
         ).run()
         paths = write_outputs(report, out_dir)
 
@@ -111,6 +118,26 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _train(args: argparse.Namespace) -> int:
+    from .learned.harvest import harvest_structures
+    from .learned.synthetic import synthetic_structures
+    from .learned.train import TrainConfig, Trainer
+
+    if args.windows == "synthetic":
+        structures = synthetic_structures(20, seed=args.seed)
+    else:
+        structures = harvest_structures(Path(args.windows))
+    trainer = Trainer(
+        TrainConfig(epochs=args.epochs, seed=args.seed),
+        structures,
+    )
+    history = trainer.train()
+    checkpoint = trainer.save(args.out)
+    print(f"epochs={len(history['epochs'])}")
+    print(f"checkpoint={checkpoint.resolve()}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse command line arguments and run the selected command."""
     parser = _parser()
@@ -118,6 +145,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "run":
         try:
             return _run(args)
+        except ValueError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+    if args.command == "train":
+        try:
+            return _train(args)
         except ValueError as error:
             print(f"error: {error}", file=sys.stderr)
             return 2

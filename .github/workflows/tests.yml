@@ -271,7 +271,7 @@ jobs:
         run: |
           source venv/bin/activate
           echo "========================================"
-          echo "Running Market Package Tests (38 tests)"
+          echo "Running Market Package Tests (42 tests)"
           echo "========================================"
           PYTHON_EXECUTABLE=$(command -v python) ./tests/run_market_tests.sh
 
@@ -351,7 +351,7 @@ jobs:
           echo "  Config (9 tests): ${{ steps.config.outcome }}"
           echo "  Native CTest (12 + MPI when available): ${{ steps.core-ctest.outcome }}"
           echo "  Python API (27 tests): ${{ steps.python-api.outcome }}"
-          echo "  Market Package (38 tests): ${{ steps.market-package.outcome }}"
+          echo "  Market Package (42 tests): ${{ steps.market-package.outcome }}"
           echo "  Append-Job (20 C++ + 4 gRPC): ${{ steps.append-job.outcome }}"
           echo "  Backfill-window focused rerun (4 checks already counted): ${{ steps.backfill-window.outcome }}"
           echo "  Single-Coordinator gRPC: ${{ steps.grpc-single-coordinator.outcome }}"
