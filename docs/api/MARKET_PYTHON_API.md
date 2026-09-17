@@ -8,15 +8,18 @@ are loaded only when their corresponding adapter is constructed.
 
 ## Installation
 
-From a source checkout, install the package and its gRPC extra with:
+From a source checkout, install the package editable from the `python/`
+directory with its gRPC and mechanism extras:
 
 ```bash
-python3 -m pip install -e "python[grpc]"
+python3 -m pip install -e "python[grpc,mechanisms]"
 ```
 
 The in-process adapter also requires the built `dr_evt` extension on
 `PYTHONPATH`. The gRPC adapter requires a server built with
 `DR_EVT_ENABLE_GRPC=ON`.
+
+Building a wheel from `python/` also invokes the extension's CMake build.
 
 ## Example
 
@@ -100,6 +103,59 @@ gRPC snapshots populate instantaneous `current_utilization`.
 
 `SessionClient` is the lower-level correlated request wrapper. Most callers
 should use `GrpcPlatform` instead.
+
+## Running the market
+
+The platform file gives each platform a node count and public hourly node
+price. A blank `address` selects the in-process adapter; a nonblank address
+selects gRPC.
+
+```text
+system_id,total_nodes,price_per_node_hour,address
+alpha,100,1.0,
+beta,60,2.0,127.0.0.1:50062
+```
+
+The jobs file has one row per leg. Bid columns name acceptable platforms and
+give the private value in credits. Blank bids make that platform unacceptable.
+Rows sharing a job ID form a composite job in file order.
+
+```text
+job_id,job_submit_time,num_nodes,time_limit,leg_id,bid:alpha,bid:beta
+job-1,0,20,60,0,10,8
+job-2,30,10,90,left,7,9
+job-2,30,15,90,right,8,10
+```
+
+At each fixed window boundary, the controller advances every platform, admits
+arrivals, reads free capacity, asks the mechanism for decisions, validates and
+submits accepted placements, and verifies that every routed leg started at the
+boundary. Unplaced jobs wait for the next window. The run then drains every
+platform.
+
+`Mechanism` is the abstract interface for allocation and charging policies.
+`Vcg` maximizes exact net welfare with Clarke pivot charges for windows of at
+most 800 candidate variables and uses its documented bounded greedy fallback
+for larger windows.
+
+Run the checked-in examples with:
+
+```bash
+python -m dr_evt_market run \
+  --jobs python/examples/market/market_jobs.csv \
+  --platforms python/examples/market/market_platforms.csv \
+  --out market-run --window 60 --mechanism vcg --seed 0
+```
+
+The output directory receives `routed.csv`, `windows.csv`, `rejected.csv`, and
+`run.json`. The command prints window, routed, and rejected counts followed by
+the SHA-256 hashes of `routed.csv` and `windows.csv`.
+
+For each nonblank address, the CLI connects to a gRPC server and uses
+`OUT/servers/<system_id>` as the server-visible work directory. Add
+`--start-servers` to launch one local `ServerProcess` at each listed address.
+The optional `--server-binary PATH` selects the executable; otherwise the
+normal `ServerProcess` search rules apply.
 
 ## Testing
 

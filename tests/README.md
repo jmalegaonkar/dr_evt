@@ -70,7 +70,7 @@ or are reported as skipped.
 | Replay | 5 | `run_replay_tests.sh` | Resource equivalence and reclamation safety |
 | Resource history | 5 | `run_resource_history_tests.sh` | Circular-buffer output and capacity handling |
 | Job store | 6 | `run_job_store_tests.sh` | Capacity, growth/abort, reclamation, and statistics |
-| Append-job | 22 | `run_append_job_tests.sh` | 19 in-process C++ checks plus 3 optional gRPC checks |
+| Append-job | 24 | `run_append_job_tests.sh` | 20 in-process C++ checks plus 4 optional gRPC checks |
 | Progressive loading | 15 | `run_progressive_load_tests.sh` | 11 C++ checks plus 4 CLI checks for multi-file loading, bounded storage, and memory checks |
 | Protobuf configuration | 9 | `run_configs_tests.sh` | Configuration/CLI parity and documented examples |
 | Python API | 27 | `run_python_tests.sh` | Bindings, callbacks, streaming, monitoring, and policy APIs |
