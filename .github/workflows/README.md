@@ -28,7 +28,7 @@ This directory contains GitHub Actions workflows for automated testing.
 - Ser20-disabled native serialization build and tests
 - Sphinx and Doxygen documentation build with warnings treated as errors
 - Python API tests (27)
-- Market package adapter, VCG, and controller tests (31)
+- Market package adapter, VCG, controller, and learned-window tests (35)
 - gRPC client/server tests (2)
 - Append-job tests (19 C++ + 3 gRPC)
 - FCFS/EASY backfill-window focused rerun of the three-case gRPC binary
@@ -83,7 +83,7 @@ Total tests referenced by the full suite:
 | Config | 9 | CI runner; includes power-usage `trace_type` coverage |
 | Native CTest | 12, plus 1 with MPI | CI runner; RNG and binary serialization, trace policies, replay reclamation, custom scheduling, append/streaming APIs, queues, and CLI dispatch |
 | Python API | 27 | CI runner |
-| Market package | 31 | CI runner; adapters, VCG, controller, and parity |
+| Market package | 35 | Adapters, VCG, controller, learned windows, and parity |
 | gRPC client/server | 2 | CI runner |
 | Append-job | 22: 19 C++ + 3 gRPC | CI runner |
 | FCFS/EASY backfill-window gRPC | 3 repeated checks; 1 targeted | CI runner |
