@@ -67,6 +67,27 @@ BasicSimulation<TraceType>::BasicSimulation(const Sim_Params &params,
   reset_capacity_schedule();
 }
 
+template <typename TraceType>
+BasicSimulation<TraceType>::BasicSimulation(
+    const Sim_Params &params, std::unique_ptr<CustomFCFSScheduler> scheduler)
+    : m_params(params), m_trace(params.m_infile, params.m_trace_format,
+                                params.m_timestamp_format, params.m_timezone),
+      m_scheduler(std::move(scheduler)),
+      m_custom_scheduler(static_cast<CustomFCFSScheduler *>(m_scheduler.get())),
+      m_current_time(0.0), m_job_rejection_capacity(params.m_total_nodes),
+      m_capacity_changes(load_capacity_schedule(params.m_capacity_schedule,
+                                                params.m_total_nodes)),
+      m_next_capacity_change(0), m_current_capacity(params.m_total_nodes),
+      m_capacity_area(0.0), m_capacity_area_time(0.0), m_jobs_completed(0),
+      m_jobs_submitted(0), m_pre_start_jobs(0), m_warm_resource_area(0.0),
+      m_warm_resource_end(0.0), m_rng(params.m_seed), m_queue_length_sum(0),
+      m_queue_length_samples(0), m_queue_length_peak(0) {
+  if (!m_scheduler) {
+    throw std::invalid_argument("custom scheduler must not be null");
+  }
+  reset_capacity_schedule();
+}
+
 template <typename TraceType> void BasicSimulation<TraceType>::run() {
   if (m_params.m_verbose) {
     std::cout << "Starting simulation..." << std::endl;

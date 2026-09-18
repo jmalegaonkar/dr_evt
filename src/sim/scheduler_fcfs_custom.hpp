@@ -42,6 +42,8 @@ class CustomFCFSScheduler : public SchedulerBase {
 private:
   template <typename TraceType> friend class BasicSimulation;
 
+protected:
+  /** Queue entry exposed read-only to scheduler subclasses. */
   struct JobEntry {
     job_no_t job_id;
     sim_time_t submit_time;
@@ -56,6 +58,7 @@ private:
           nodes_requested(nodes), m_cost(cost), removed(false) {}
   };
 
+private:
   boost::circular_buffer<JobEntry> m_wait_queue;
   CircularOverflowPolicy m_overflow_policy;
   size_t m_eligible_end_idx;
@@ -100,6 +103,24 @@ protected:
   /** Estimate the waiting-queue horizon for the settled Custom-FCFS state. */
   tdiff_t prediction_horizon(const running_jobs_t &running_jobs,
                              sim_time_t current_time, double utilization) const;
+
+  /** Return a read-only view of all stored queue entries. */
+  const boost::circular_buffer<JobEntry> &queued_jobs() const {
+    return m_wait_queue;
+  }
+
+  /** Return the exclusive end of the currently eligible queue range. */
+  size_t eligible_job_end() const { return m_eligible_end_idx; }
+
+  /** Allow a subclass to choose from the bounded feasible candidate set. */
+  virtual std::optional<job_no_t> select_backfill_candidate(
+      const backfill_candidates_t &candidates, num_nodes_t available_nodes,
+      const running_jobs_t &effective_running_jobs, sim_time_t current_time);
+
+  /** Called after no additional job can be dispatched at the current time. */
+  virtual void on_scheduling_cycle_complete(num_nodes_t available_nodes,
+                                            const running_jobs_t &running_jobs,
+                                            sim_time_t current_time);
 
 public:
   /**

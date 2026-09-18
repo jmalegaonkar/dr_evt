@@ -85,6 +85,60 @@ void test_selector_must_return_a_candidate() {
   assert(threw);
 }
 
+class ObservingCustomScheduler final : public CustomFCFSScheduler {
+public:
+  ObservingCustomScheduler()
+      : CustomFCFSScheduler(100, 0, BackfillPolicy::EASY, 2,
+                            cost_from_job_order, select_lowest_cost) {}
+
+  size_t selection_calls = 0;
+  size_t completed_cycles = 0;
+  size_t waiting_at_completion = 0;
+
+protected:
+  std::optional<job_no_t> select_backfill_candidate(
+      const backfill_candidates_t &candidates, num_nodes_t available_nodes,
+      const running_jobs_t &running_jobs,
+      sim_time_t current_time) override {
+    ++selection_calls;
+    return CustomFCFSScheduler::select_backfill_candidate(
+        candidates, available_nodes, running_jobs, current_time);
+  }
+
+  void on_scheduling_cycle_complete(num_nodes_t, const running_jobs_t &,
+                                    sim_time_t) override {
+    ++completed_cycles;
+    waiting_at_completion = 0;
+    const auto &entries = queued_jobs();
+    for (size_t index = 0; index < eligible_job_end(); ++index) {
+      waiting_at_completion += entries[index].removed ? 0 : 1;
+    }
+  }
+};
+
+void test_subclass_extension_hooks() {
+  ObservingCustomScheduler scheduler;
+  scheduler.insert_job(0, 0.0, 100.0, 70);
+  scheduler.insert_job(1, 0.0, 200.0, 50);
+  scheduler.insert_job(2, 0.0, 50.0, 20);
+  scheduler.insert_job(3, 0.0, 20.0, 10);
+
+  running_jobs_t running;
+  const auto first = scheduler.schedule(100, running, 0.0);
+  assert((first == std::vector<job_no_t>{0, 2}));
+  running[0] = {0.0, 100.0, 70};
+  running[2] = {0.0, 50.0, 20};
+
+  const auto second = scheduler.schedule(10, running, 0.0);
+  assert((second == std::vector<job_no_t>{3}));
+  running[3] = {0.0, 20.0, 10};
+
+  assert(scheduler.schedule(0, running, 0.0).empty());
+  assert(scheduler.selection_calls == 2);
+  assert(scheduler.completed_cycles == 1);
+  assert(scheduler.waiting_at_completion == 1);
+}
+
 void test_current_utilization_api() {
   constexpr const char *trace_path = "/tmp/dr_evt_custom_scheduler_empty.csv";
   {
@@ -255,6 +309,7 @@ int main(int argc, char **argv) {
 
   test_external_backfill_selection();
   test_selector_must_return_a_candidate();
+  test_subclass_extension_hooks();
   test_current_utilization_api();
   test_batch_resource_area_accounting();
   test_warm_start_resource_area_accounting();

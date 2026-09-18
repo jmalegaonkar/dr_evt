@@ -124,6 +124,10 @@ public:
   BasicSimulation(const Sim_Params &params, job_cost_function_t cost_function,
                   backfill_selector_t selector);
 
+  /** Construct a simulation with a configured Custom-FCFS subclass. */
+  BasicSimulation(const Sim_Params &params,
+                  std::unique_ptr<CustomFCFSScheduler> scheduler);
+
   /**
    * @brief Run a complete batch simulation for the configured trace.
    * @details

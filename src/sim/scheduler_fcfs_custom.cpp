@@ -168,6 +168,23 @@ CustomFCFSScheduler::prediction_horizon(const running_jobs_t &running_jobs,
              (effective_utilization * static_cast<double>(m_total_nodes));
 }
 
+std::optional<job_no_t> CustomFCFSScheduler::select_backfill_candidate(
+    const backfill_candidates_t &candidates, num_nodes_t available_nodes,
+    const running_jobs_t &effective_running_jobs, sim_time_t current_time) {
+  (void)available_nodes;
+  (void)effective_running_jobs;
+  (void)current_time;
+  return m_backfill_selector(candidates);
+}
+
+void CustomFCFSScheduler::on_scheduling_cycle_complete(
+    num_nodes_t available_nodes, const running_jobs_t &running_jobs,
+    sim_time_t current_time) {
+  (void)available_nodes;
+  (void)running_jobs;
+  (void)current_time;
+}
+
 void CustomFCFSScheduler::insert_job(job_no_t job_id, sim_time_t submit_time,
                                      tdiff_t run_time_estimate,
                                      num_nodes_t nodes_requested) {
@@ -262,6 +279,7 @@ CustomFCFSScheduler::schedule(num_nodes_t free_nodes,
   compact_if_needed();
 
   if (m_eligible_end_idx == 0) {
+    on_scheduling_cycle_complete(free_nodes, running_jobs, current_time);
     return {};
   }
 
@@ -286,6 +304,10 @@ CustomFCFSScheduler::schedule(num_nodes_t free_nodes,
   }
 
   if (active_job_count() == 0 || m_backfill_policy == BackfillPolicy::NONE) {
+    if (jobs_to_run.empty()) {
+      on_scheduling_cycle_complete(available_nodes, effective_running_jobs,
+                                   current_time);
+    }
     return jobs_to_run;
   }
 
@@ -296,11 +318,20 @@ CustomFCFSScheduler::schedule(num_nodes_t free_nodes,
   const auto candidates = find_backfill_candidates(
       available_nodes, current_time, m_fcfs_reservation_time);
   if (candidates.empty()) {
+    if (jobs_to_run.empty()) {
+      on_scheduling_cycle_complete(available_nodes, effective_running_jobs,
+                                   current_time);
+    }
     return jobs_to_run;
   }
 
-  const std::optional<job_no_t> selected = m_backfill_selector(candidates);
+  const std::optional<job_no_t> selected = select_backfill_candidate(
+      candidates, available_nodes, effective_running_jobs, current_time);
   if (!selected) {
+    if (jobs_to_run.empty()) {
+      on_scheduling_cycle_complete(available_nodes, effective_running_jobs,
+                                   current_time);
+    }
     return jobs_to_run;
   }
 
