@@ -930,7 +930,12 @@ void BasicSimulation<TraceType>::advance_to_impl(
   // jobs appended at the current time by a streaming caller.
   m_scheduler->sync_to(m_current_time);
   record_queue_arrivals(m_current_time);
-  apply_capacity_changes(m_current_time);
+  const bool initial_capacity_changed = apply_capacity_changes(m_current_time);
+  if constexpr (AccountResources) {
+    if (initial_capacity_changed) {
+      custom_scheduler->notify_resource_change();
+    }
+  }
   if (m_scheduler->has_eligible_jobs()) {
     // Call scheduler to evaluate newly arriving jobs
     while (true) {
@@ -1072,6 +1077,12 @@ void BasicSimulation<TraceType>::advance_to_impl(
 
       const bool capacity_changed = apply_capacity_changes(m_current_time);
 
+      if constexpr (AccountResources) {
+        if (processed_end_event || capacity_changed) {
+          custom_scheduler->notify_resource_change();
+        }
+      }
+
       // Only call scheduler if we processed END events (resources freed)
       should_schedule = processed_end_event || capacity_changed ||
                         next_arrival == m_current_time;
@@ -1093,7 +1104,12 @@ void BasicSimulation<TraceType>::advance_to_impl(
       // this doesn't rely on that.
       m_scheduler->sync_to(m_current_time);
       record_queue_arrivals(m_current_time);
-      apply_capacity_changes(m_current_time);
+      const bool capacity_changed = apply_capacity_changes(m_current_time);
+      if constexpr (AccountResources) {
+        if (capacity_changed) {
+          custom_scheduler->notify_resource_change();
+        }
+      }
 
       // jobs_at_next_arrival already collected during wait_queue scan
       // TODO: Pass jobs_at_next_arrival to scheduler for efficient evaluation
@@ -1109,6 +1125,9 @@ void BasicSimulation<TraceType>::advance_to_impl(
       m_scheduler->sync_to(m_current_time);
       record_queue_arrivals(m_current_time);
       apply_capacity_changes(m_current_time);
+      if constexpr (AccountResources) {
+        custom_scheduler->notify_resource_change();
+      }
       should_schedule = true;
     } else {
       // No arrivals and no replay events before target_time

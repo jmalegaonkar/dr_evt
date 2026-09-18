@@ -65,6 +65,10 @@ private:
   sim_time_t m_current_tracked_time;
   size_t m_removed_count;
   size_t m_num_max_candidates;
+  size_t m_newly_eligible_begin_idx;
+  bool m_arrival_update_pending;
+  bool m_reevaluate_all_candidates;
+  bool m_candidate_preparation_pending;
   job_cost_function_t m_job_cost_function;
   backfill_selector_t m_backfill_selector;
 
@@ -104,6 +108,22 @@ protected:
   tdiff_t prediction_horizon(const running_jobs_t &running_jobs,
                              sim_time_t current_time, double utilization) const;
 
+  /**
+   * Construct the FCFS scheduling core for a subclass-owned selection policy.
+   * The subclass must override select_backfill_candidate() and may insert
+   * precomputed queue costs with insert_job_with_cost().
+   */
+  CustomFCFSScheduler(
+      num_nodes_t total_nodes, size_t initial_job_count,
+      BackfillPolicy bf_policy, size_t num_max_candidates,
+      size_t initial_capacity,
+      CircularOverflowPolicy overflow_policy = CircularOverflowPolicy::GROW);
+
+  /** Insert a job with a cost computed by a subclass-owned policy. */
+  void insert_job_with_cost(job_no_t job_id, sim_time_t submit_time,
+                            tdiff_t run_time_estimate,
+                            num_nodes_t nodes_requested, job_cost_t cost);
+
   /** Return a read-only view of all stored queue entries. */
   const boost::circular_buffer<JobEntry> &queued_jobs() const {
     return m_wait_queue;
@@ -116,6 +136,26 @@ protected:
   virtual std::optional<job_no_t> select_backfill_candidate(
       const backfill_candidates_t &candidates, num_nodes_t available_nodes,
       const running_jobs_t &effective_running_jobs, sim_time_t current_time);
+
+  /**
+   * Called once after a complete same-timestamp arrival batch becomes
+   * eligible and before any FCFS dispatch from that batch.
+   */
+  virtual void on_jobs_became_eligible(size_t newly_eligible_begin,
+                                       size_t eligible_end,
+                                       num_nodes_t available_nodes,
+                                       const running_jobs_t &running_jobs,
+                                       sim_time_t current_time);
+
+  /**
+   * Called once after FCFS dispatch and before the first backfill selection
+   * for an event cycle.
+   */
+  virtual void
+  on_backfill_candidates_ready(const backfill_candidates_t &candidates,
+                               num_nodes_t available_nodes,
+                               const running_jobs_t &effective_running_jobs,
+                               sim_time_t current_time, bool fcfs_jobs_started);
 
   /** Called after no additional job can be dispatched at the current time. */
   virtual void on_scheduling_cycle_complete(num_nodes_t available_nodes,
@@ -175,6 +215,28 @@ protected:
   size_t wait_queue_size() const override { return m_wait_queue.size(); }
 
 private:
+  /** Request a full candidate scan after completions or capacity changes. */
+  void notify_resource_change() {
+    m_reevaluate_all_candidates = true;
+    m_candidate_preparation_pending = true;
+  }
+
+  /** Complete one event-time scheduling cycle and reset scan tracking. */
+  void finish_scheduling_cycle(num_nodes_t available_nodes,
+                               const running_jobs_t &running_jobs,
+                               sim_time_t current_time);
+
+  void complete_candidate_scan() {
+    m_newly_eligible_begin_idx = m_eligible_end_idx;
+    m_reevaluate_all_candidates = false;
+    m_candidate_preparation_pending = false;
+  }
+
+  backfill_candidates_t
+  find_backfill_candidates_from(size_t begin_idx, num_nodes_t available_nodes,
+                                sim_time_t current_time,
+                                sim_time_t reservation_time) const;
+
   void compact_if_needed();
 };
 
