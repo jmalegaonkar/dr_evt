@@ -85,6 +85,132 @@ void test_selector_must_return_a_candidate() {
   assert(threw);
 }
 
+void test_arrival_scans_only_new_jobs() {
+  constexpr const char *trace_path =
+      "/tmp/dr_evt_custom_scheduler_arrival_scan.csv";
+  {
+    std::ofstream trace(trace_path);
+    trace << "job_submit_time,num_nodes,time_limit\n";
+  }
+
+  Sim_Params params;
+  params.m_infile = trace_path;
+  params.m_total_nodes = 100;
+  params.m_trace_format = "simple";
+  params.m_timestamp_format = "epoch";
+  params.m_run_time_mode = RunTimeMode::LIMIT;
+  params.m_backfill_policy = BackfillPolicy::EASY;
+  params.m_num_max_candidates = 4;
+
+  std::vector<backfill_candidates_t> selections;
+  auto selector =
+      [&selections](
+          const backfill_candidates_t &candidates) -> std::optional<job_no_t> {
+    selections.push_back(candidates);
+    if (selections.size() == 1) {
+      return std::nullopt;
+    }
+    return candidates.front().first;
+  };
+
+  Simulation simulation(params, cost_from_job_order, selector);
+  simulation.get_trace().load_data(0);
+  simulation.append_job(0.0, 70, kTestQueue, 100.0);
+  simulation.append_job(0.0, 50, kTestQueue, 200.0);
+  simulation.append_job(0.0, 20, kTestQueue, 20.0);
+  simulation.advance_to(0.0);
+
+  // Job 2 was feasible but deliberately declined at t=0. At an arrival-only
+  // event, only the newly eligible job is reconsidered.
+  simulation.append_job(10.0, 10, kTestQueue, 10.0);
+  simulation.advance_to(10.0);
+
+  // When job 3 completes, resources change and the full waiting queue is
+  // eligible for reconsideration, including the previously declined job 2.
+  simulation.advance_to(20.0);
+
+  assert(selections.size() == 3);
+  assert((selections[0] == backfill_candidates_t{{2, 2}}));
+  assert((selections[1] == backfill_candidates_t{{3, 3}}));
+  assert((selections[2] == backfill_candidates_t{{2, 2}}));
+}
+
+class ObservingCustomScheduler final : public CustomFCFSScheduler {
+public:
+  ObservingCustomScheduler()
+      : CustomFCFSScheduler(100, 0, BackfillPolicy::EASY, 2,
+                            cost_from_job_order, select_lowest_cost) {}
+
+  size_t selection_calls = 0;
+  size_t arrival_updates = 0;
+  size_t jobs_in_arrival_update = 0;
+  size_t candidate_preparations = 0;
+  bool fcfs_started_before_candidates = false;
+  size_t completed_cycles = 0;
+  size_t waiting_at_completion = 0;
+
+protected:
+  void on_jobs_became_eligible(size_t newly_eligible_begin, size_t eligible_end,
+                               num_nodes_t, const running_jobs_t &,
+                               sim_time_t) override {
+    ++arrival_updates;
+    jobs_in_arrival_update = eligible_end - newly_eligible_begin;
+  }
+
+  void on_backfill_candidates_ready(const backfill_candidates_t &, num_nodes_t,
+                                    const running_jobs_t &, sim_time_t,
+                                    bool fcfs_jobs_started) override {
+    ++candidate_preparations;
+    fcfs_started_before_candidates = fcfs_jobs_started;
+  }
+
+  std::optional<job_no_t> select_backfill_candidate(
+      const backfill_candidates_t &candidates, num_nodes_t available_nodes,
+      const running_jobs_t &running_jobs, sim_time_t current_time) override {
+    ++selection_calls;
+    return CustomFCFSScheduler::select_backfill_candidate(
+        candidates, available_nodes, running_jobs, current_time);
+  }
+
+  void on_scheduling_cycle_complete(num_nodes_t, const running_jobs_t &,
+                                    sim_time_t) override {
+    ++completed_cycles;
+    waiting_at_completion = 0;
+    const auto &entries = queued_jobs();
+    for (size_t index = 0; index < eligible_job_end(); ++index) {
+      waiting_at_completion += entries[index].removed ? 0 : 1;
+    }
+  }
+};
+
+void test_subclass_extension_hooks() {
+  ObservingCustomScheduler scheduler;
+  scheduler.insert_job(0, 0.0, 100.0, 70);
+  scheduler.insert_job(1, 0.0, 200.0, 50);
+  scheduler.insert_job(2, 0.0, 50.0, 20);
+  scheduler.insert_job(3, 0.0, 20.0, 10);
+
+  running_jobs_t running;
+  const auto first = scheduler.schedule(100, running, 0.0);
+  assert((first == std::vector<job_no_t>{0, 2}));
+  running[0] = {0.0, 100.0, 70};
+  running[2] = {0.0, 50.0, 20};
+
+  const auto second = scheduler.schedule(10, running, 0.0);
+  assert((second == std::vector<job_no_t>{3}));
+  running[3] = {0.0, 20.0, 10};
+
+  assert(scheduler.schedule(0, running, 0.0).empty());
+  assert(scheduler.selection_calls == 2);
+  // All four t=0 arrivals are exposed by one end-of-batch update.
+  assert(scheduler.arrival_updates == 1);
+  assert(scheduler.jobs_in_arrival_update == 4);
+  assert(scheduler.candidate_preparations == 1);
+  assert(scheduler.fcfs_started_before_candidates);
+  assert(scheduler.completed_cycles == 1);
+  assert(scheduler.waiting_at_completion == 1);
+}
+
 void test_current_utilization_api() {
   constexpr const char *trace_path = "/tmp/dr_evt_custom_scheduler_empty.csv";
   {
@@ -255,6 +381,8 @@ int main(int argc, char **argv) {
 
   test_external_backfill_selection();
   test_selector_must_return_a_candidate();
+  test_arrival_scans_only_new_jobs();
+  test_subclass_extension_hooks();
   test_current_utilization_api();
   test_batch_resource_area_accounting();
   test_warm_start_resource_area_accounting();

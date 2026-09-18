@@ -67,6 +67,27 @@ BasicSimulation<TraceType>::BasicSimulation(const Sim_Params &params,
   reset_capacity_schedule();
 }
 
+template <typename TraceType>
+BasicSimulation<TraceType>::BasicSimulation(
+    const Sim_Params &params, std::unique_ptr<CustomFCFSScheduler> scheduler)
+    : m_params(params), m_trace(params.m_infile, params.m_trace_format,
+                                params.m_timestamp_format, params.m_timezone),
+      m_scheduler(std::move(scheduler)),
+      m_custom_scheduler(static_cast<CustomFCFSScheduler *>(m_scheduler.get())),
+      m_current_time(0.0), m_job_rejection_capacity(params.m_total_nodes),
+      m_capacity_changes(load_capacity_schedule(params.m_capacity_schedule,
+                                                params.m_total_nodes)),
+      m_next_capacity_change(0), m_current_capacity(params.m_total_nodes),
+      m_capacity_area(0.0), m_capacity_area_time(0.0), m_jobs_completed(0),
+      m_jobs_submitted(0), m_pre_start_jobs(0), m_warm_resource_area(0.0),
+      m_warm_resource_end(0.0), m_rng(params.m_seed), m_queue_length_sum(0),
+      m_queue_length_samples(0), m_queue_length_peak(0) {
+  if (!m_scheduler) {
+    throw std::invalid_argument("custom scheduler must not be null");
+  }
+  reset_capacity_schedule();
+}
+
 template <typename TraceType> void BasicSimulation<TraceType>::run() {
   if (m_params.m_verbose) {
     std::cout << "Starting simulation..." << std::endl;
@@ -909,7 +930,12 @@ void BasicSimulation<TraceType>::advance_to_impl(
   // jobs appended at the current time by a streaming caller.
   m_scheduler->sync_to(m_current_time);
   record_queue_arrivals(m_current_time);
-  apply_capacity_changes(m_current_time);
+  const bool initial_capacity_changed = apply_capacity_changes(m_current_time);
+  if constexpr (AccountResources) {
+    if (initial_capacity_changed) {
+      custom_scheduler->notify_resource_change();
+    }
+  }
   if (m_scheduler->has_eligible_jobs()) {
     // Call scheduler to evaluate newly arriving jobs
     while (true) {
@@ -1051,6 +1077,12 @@ void BasicSimulation<TraceType>::advance_to_impl(
 
       const bool capacity_changed = apply_capacity_changes(m_current_time);
 
+      if constexpr (AccountResources) {
+        if (processed_end_event || capacity_changed) {
+          custom_scheduler->notify_resource_change();
+        }
+      }
+
       // Only call scheduler if we processed END events (resources freed)
       should_schedule = processed_end_event || capacity_changed ||
                         next_arrival == m_current_time;
@@ -1072,7 +1104,12 @@ void BasicSimulation<TraceType>::advance_to_impl(
       // this doesn't rely on that.
       m_scheduler->sync_to(m_current_time);
       record_queue_arrivals(m_current_time);
-      apply_capacity_changes(m_current_time);
+      const bool capacity_changed = apply_capacity_changes(m_current_time);
+      if constexpr (AccountResources) {
+        if (capacity_changed) {
+          custom_scheduler->notify_resource_change();
+        }
+      }
 
       // jobs_at_next_arrival already collected during wait_queue scan
       // TODO: Pass jobs_at_next_arrival to scheduler for efficient evaluation
@@ -1088,6 +1125,9 @@ void BasicSimulation<TraceType>::advance_to_impl(
       m_scheduler->sync_to(m_current_time);
       record_queue_arrivals(m_current_time);
       apply_capacity_changes(m_current_time);
+      if constexpr (AccountResources) {
+        custom_scheduler->notify_resource_change();
+      }
       should_schedule = true;
     } else {
       // No arrivals and no replay events before target_time
