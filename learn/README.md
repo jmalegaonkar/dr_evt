@@ -14,7 +14,7 @@ learned about dr_evt itself along the way, with every claim demonstrated by runn
 | `04_mini_federation.ipynb` | four platforms with different node counts and speeds, a start-time predictor from the backfill window, two routers, a controller loop, service metrics from records |
 | `05_composite_jobs.ipynb` | dr_evt's composite-fragment format, coordinator protocol and `partial_start` observation, its test oracle, and the one gate that makes partial starts impossible when a single controller submits |
 | `06_market_package.ipynb` | the `dr_evt_market` package that grew out of 02 to 04: one platform in process and over gRPC through the same contract, the error taxonomy, and parity with the `simulator` CLI |
-| `07_market_end_to_end.ipynb` | the market end to end: the two input files, one window by hand with VCG decisions and Clarke pivots, the controller run and its outputs, the same run with one platform over gRPC, and the command line |
+| `07_market_end_to_end.ipynb` | the market end to end as a design story: the platform contract and the C++ it needed, how dr_evt's own `Simulation`, `dr_evt_server` and `grpc_multi_server.py` session client are wrapped behind that contract, what is sold and what a bid is (public hardware feasibility, one multiplier on the base cost, cost plus premium), the eight market records and the functions between them, VCG, the controller and its outputs, then the example run, one window by hand with Clarke pivots, the same run with one platform over gRPC, the command line, and RegretFormer as a plug |
 
 ## Running them
 

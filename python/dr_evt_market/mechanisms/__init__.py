@@ -5,47 +5,47 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Public types and interfaces for DR_EVT market mechanisms."""
+"""The market's data model, clearing step and mechanisms."""
 
 from .base import (
     Decision,
-    JobBid,
-    JobOffer,
-    LegBid,
-    LegSpec,
-    MarketObservation,
+    Job,
+    Leg,
     Mechanism,
     Placement,
-    RejectedDecision,
+    Platform,
+    Rejection,
+    Window,
+    demand,
     validate_decisions,
 )
-from .clearing import QueuedJob, build_observation, submit_decisions
+from .clearing import base_cost, build_window, placements, submit
 from .vcg import Vcg
 
 __all__ = [
     "Decision",
-    "JobBid",
-    "JobOffer",
-    "LegBid",
-    "LegSpec",
-    "MarketObservation",
+    "Job",
+    "Leg",
     "Mechanism",
     "Placement",
-    "QueuedJob",
-    "RejectedDecision",
+    "Platform",
     "RegretFormer",
+    "Rejection",
     "Vcg",
-    "build_observation",
-    "submit_decisions",
+    "Window",
+    "base_cost",
+    "build_window",
+    "demand",
+    "placements",
+    "submit",
     "validate_decisions",
 ]
 
 
 def __getattr__(name: str):
-    """Load torch-dependent mechanism classes only when requested."""
+    """Import the learned mechanism only when it is asked for."""
     if name == "RegretFormer":
         from .regretformer import RegretFormer
 
-        globals()[name] = RegretFormer
         return RegretFormer
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    raise AttributeError(name)

@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Smoke tests for synthetic RegretFormer training and checkpoints."""
+"""Tests for training on synthetic and harvested windows."""
 
 from pathlib import Path
 import tempfile
@@ -14,101 +14,84 @@ import unittest
 try:
     import torch
 
+    from dr_evt_market.learned.harvest import harvest_structures
     from dr_evt_market.learned.synthetic import synthetic_structures
     from dr_evt_market.learned.train import TrainConfig, Trainer
     from dr_evt_market.mechanisms import RegretFormer
 except ModuleNotFoundError:
     torch = None
 
-from dr_evt_market import PlatformSnapshot, read_jobs, read_platforms
-from dr_evt_market.mechanisms import build_observation, validate_decisions
+from dr_evt_market import (
+    Controller,
+    InProcessPlatform,
+    read_jobs,
+    read_platforms,
+    write_outputs,
+)
+from dr_evt_market.mechanisms import Vcg, build_window, validate_decisions
 
-_DATA_DIR = Path(__file__).with_name("data")
-
-
-def _fixture_observation():
-    platforms = read_platforms(_DATA_DIR / "market_platforms.csv")
-    jobs, bids = read_jobs(_DATA_DIR / "market_jobs.csv", platforms)
-    snapshots = {
-        platform.system_id: PlatformSnapshot(
-            name=platform.system_id,
-            time_s=0,
-            total_nodes=platform.total_nodes,
-            free_nodes=platform.total_nodes,
-            in_use_nodes=0,
-            waiting_jobs=0,
-            current_utilization=0.0,
-        )
-        for platform in platforms
-    }
-    prices = {
-        platform.system_id: platform.price_per_node_hour
-        for platform in platforms
-    }
-    return build_observation(0, 0, 13, jobs, bids, snapshots, prices)
+_DATA = Path(__file__).with_name("data")
 
 
 @unittest.skipIf(torch is None, "torch is not installed")
 class TrainerTests(unittest.TestCase):
-    """Exercise a short deterministic training and loading cycle."""
+    """A short training cycle and the harvest path."""
 
-    def test_two_epoch_training_saves_a_deployable_checkpoint(self) -> None:
-        """Twenty synthetic windows train, evaluate, save, and reload."""
-        structures = synthetic_structures(20, seed=37)
-        config = TrainConfig(
-            epochs=2,
-            batch_size=5,
-            misreport_steps=1,
-            regret_jobs_per_batch=1,
-            hid=8,
-            hid_att=4,
-            n_layers=1,
-            n_heads=1,
-            evaluation_grid=(0.5, 1.0, 1.5),
-            evaluation_steps=1,
-            evaluation_perturbations=0,
-            seed=37,
+    def test_two_epochs_train_save_and_reload(self) -> None:
+        """Synthetic windows train, evaluate, save and deploy."""
+        trainer = Trainer(
+            TrainConfig(
+                epochs=2,
+                batch_size=5,
+                misreport_steps=1,
+                regret_jobs_per_batch=1,
+                hid=8,
+                hid_att=4,
+                n_layers=1,
+                n_heads=1,
+                evaluation_grid=(0.5, 1.0, 1.5),
+                evaluation_steps=1,
+                evaluation_perturbations=0,
+                seed=37,
+            ),
+            synthetic_structures(20, seed=37),
         )
-        trainer = Trainer(config, structures)
-
         result = trainer.train()
-
         self.assertEqual(len(result["epochs"]), 2)
-        self.assertEqual(
-            set(result["epochs"][0]),
-            {
-                "epoch",
-                "objective",
-                "relaxed_regret",
-                "capacity_penalty",
-                "dual",
-                "regret_target",
-                "loss",
-            },
+        self.assertIn("vcg_welfare_coverage", result["evaluation"])
+        platforms = {p.name: p for p in read_platforms(_DATA / "market_platforms.csv")}
+        window = build_window(
+            0,
+            0,
+            read_jobs(_DATA / "market_jobs.csv"),
+            platforms,
+            {n: p.total_nodes for n, p in platforms.items()},
         )
-        self.assertEqual(
-            set(result["evaluation"]),
-            {
-                "vcg_welfare_coverage",
-                "mean_regret",
-                "max_regret",
-                "mean_regret_over_mean_truthful_utility",
-            },
-        )
+        with tempfile.TemporaryDirectory(prefix="dr_evt_market_train_") as directory:
+            mechanism = RegretFormer(trainer.save(Path(directory) / "trained.pt"))
+        decisions = mechanism.decide(window)
+        self.assertEqual(validate_decisions(window, decisions), (decisions, []))
 
-        with tempfile.TemporaryDirectory(
-            prefix="dr_evt_market_train_"
-        ) as directory:
-            checkpoint = trainer.save(Path(directory) / "trained.pt")
-            mechanism = RegretFormer(checkpoint)
-
-        decisions = mechanism.decide(_fixture_observation())
-        accepted, rejected = validate_decisions(
-            _fixture_observation(),
-            decisions,
-        )
-        self.assertEqual(accepted, decisions)
-        self.assertEqual(rejected, [])
+    def test_logged_windows_can_be_harvested(self) -> None:
+        """A run with a log directory yields structures for training."""
+        platforms = {p.name: p for p in read_platforms(_DATA / "market_platforms.csv")}
+        with tempfile.TemporaryDirectory(prefix="dr_evt_market_harvest_") as directory:
+            root = Path(directory)
+            sessions = {
+                n: InProcessPlatform(n, p.total_nodes, root / n)
+                for n, p in platforms.items()
+            }
+            report = Controller(
+                sessions,
+                platforms,
+                Vcg(),
+                read_jobs(_DATA / "market_jobs.csv"),
+                window_s=60,
+                log_dir=root / "out",
+            ).run()
+            write_outputs(report, root / "out")
+            structures = harvest_structures(root / "out")
+        self.assertEqual(len(structures), sum(1 for w in report.windows if w.queued))
 
 
 if __name__ == "__main__":

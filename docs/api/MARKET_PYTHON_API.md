@@ -1,142 +1,151 @@
 # Market Python API
 
-The `dr_evt_market` package provides one contract for driving DR_EVT either
-through the in-process Python extension or through a gRPC server.
+`dr_evt_market` is a market over DR_EVT clusters. A jobs file with bids goes to
+the client, which is the auction; the auction places each job on a platform;
+the platform's own DR_EVT scheduler runs it. The package has three layers: the
+platform contract and its two adapters, the market's data model with its
+mechanisms, and the controller that runs windows over a job stream.
 
-The package itself imports without loading `dr_evt` or gRPC. Those dependencies
-are loaded only when their corresponding adapter is constructed.
+The package imports without `dr_evt`, gRPC, NumPy, SciPy or torch. Each of
+those is imported by the adapter, mechanism or module that needs it.
 
 ## Installation
 
 From a source checkout, install the package editable from the `python/`
-directory with its gRPC and mechanism extras:
+directory with the extras you need:
 
 ```bash
 python3 -m pip install -e "python[grpc,mechanisms]"
 ```
 
-The in-process adapter also requires the built `dr_evt` extension on
-`PYTHONPATH`. The gRPC adapter requires a server built with
-`DR_EVT_ENABLE_GRPC=ON`.
+`grpc` covers the gRPC adapter, `mechanisms` covers VCG (NumPy and SciPy),
+`learned` covers RegretFormer (torch). Building a wheel from `python/` also
+invokes the extension's CMake build, so install editable only.
 
-Building a wheel from `python/` also invokes the extension's CMake build.
+## The platform contract
 
-## Example
-
-```python
-from dr_evt_market import InProcessPlatform, SubmitRequest
-
-platform = InProcessPlatform("alpha", 100, "run/alpha")
-handle = platform.submit([
-    SubmitRequest("job-1", submit_s=0, num_nodes=20, limit_s=60)
-])[0]
-
-# Submission enqueues the job. Advancement evaluates it.
-platform.advance_to(0)
-snapshot = platform.snapshot()
-timing = platform.timings([handle])[0]
-report = platform.finish()
-```
-
-Submission times and advancement targets must be integer seconds. Call
-`snapshot()` after `advance_to()` at the same time; a snapshot between submit
-and advance describes a queue the scheduler has not evaluated yet.
-
-## Contract types
+Everything the market needs from a cluster goes through six methods and five
+frozen records in `dr_evt_market.platforms.base`. Times are integer seconds on
+the way in and floats on the way out.
 
 | Type | Purpose |
 |---|---|
-| `SubmitRequest` | Client key, submit time, node demand, limit, and queue ID. |
-| `JobTiming` | Submitted job handle and key with observed or projected timing fields. |
-| `PlatformSnapshot` | Capacity, queue, and live metric state. |
-| `PlatformReport` | Final timings, statistics, and output trace paths. |
+| `SubmitRequest` | One leg for a platform: key, submit time, nodes, limit, queue id. |
+| `JobTiming` | What the platform did with one leg: handle, key, submit, begin, end, limit, actual run time, nodes, scheduled. |
+| `PlatformSnapshot` | Free, in-use and waiting counts and utilization at one time. |
+| `PlatformReport` | Every timing, DR_EVT's statistics and the two output paths. |
 | `PlatformSession` | Protocol implemented by both adapters. |
-
-All contract dataclasses are frozen. `SubmitRequest.q_id` defaults to `"1"`
-and must be a digit string from `"1"` through `"10"`.
-
-Both adapters implement these methods:
 
 | Method | Behavior |
 |---|---|
-| `now()` | Return the current integer simulation time. |
-| `submit(jobs)` | Validate and append one non-decreasing batch without advancing. |
-| `advance_to(time_s)` | Process all scheduler events at or before `time_s`. |
-| `snapshot()` | Return current capacity, queue, and live metrics. |
-| `timings(handles)` | Return timing records in request order. |
-| `finish()` | Drain work, write traces, close the adapter, and cache its report. |
+| `now()` | The platform clock. |
+| `submit(jobs)` | Validate one batch, append it in one call, return a handle per leg; appending only queues. |
+| `advance_to(time_s)` | Process every event up to and including that time. |
+| `snapshot()` | The snapshot at the current time; call it after `advance_to()`. |
+| `timings(handles)` | Timing records in request order. |
+| `finish()` | Drain, write both traces, close the adapter, return the cached report. |
 
-The adapters reject malformed requests before appending any part of a batch:
+The adapters refuse what DR_EVT would accept silently, with four error types:
+`ClockViolation` (fractional, backward or out-of-order time),
+`StructuralRejection` (a leg that can never fit, or a non-positive size or
+limit), `ConfigurationError` (a bad queue id, policy, name or address), and
+`InfrastructureFailure` (a process, stream or file failure, or any call after
+`finish()`). An unknown timing handle raises `KeyError` naming the handle.
 
-- `ClockViolation` covers fractional, backward, or out-of-order time;
-- `ConfigurationError` covers invalid policy, queue, name, or binary settings;
-- `StructuralRejection` covers nonpositive demand or limits and jobs larger
-  than the platform; and
-- `InfrastructureFailure` covers process, stream, file, and server failures.
-
-An unknown or unavailable timing handle raises `KeyError` naming the handle.
-After `finish()`, every method except `finish()` raises
-`InfrastructureFailure`.
-
-## In-process adapter
-
-`InProcessPlatform(name, total_nodes, work_dir, *, backfill="easy")` owns a
-`dr_evt.SimParams` and standard `Simulation` for its whole lifetime. It runs
-LIMIT mode with EASY backfill and FCFS priority. The `backfill` argument accepts
-only `"easy"` today. Snapshots populate instantaneous `current_utilization`.
-
-## gRPC adapter and local server
-
+`InProcessPlatform(name, total_nodes, work_dir, *, backfill="easy")` owns one
+`dr_evt.Simulation` in limit run time mode with EASY backfill and FCFS
+priority; `backfill` accepts only `"easy"` today.
 `GrpcPlatform(name, total_nodes, address, work_dir_on_server, *, session_name)`
-creates one streaming server session. `session_name` must be filename safe.
-`work_dir_on_server` must be the server's working directory and must be visible
-to the client when it needs to read returned output paths.
+is the same contract over a DR_EVT server session; `work_dir_on_server` must be
+a directory both sides can reach, since the client writes the header file there.
+`ServerProcess(binary, work_dir, address=None)` starts a local `dr_evt_server`
+(pass `None` for `binary` to search the install prefix), writes its output to
+`work_dir/server.log`, and stops it on exit.
 
-`ServerProcess(binary, work_dir, address=None)` manages a local
-`dr_evt_server` as a context manager. Pass `None` for `binary` to use
-`CMAKE_INSTALL_PREFIX` when set, or otherwise search `install/bin` and then
-`build`. When no address is given it selects a free localhost port and waits
-for the gRPC channel before returning. Server output is written to
-`work_dir/server.log`.
+## The market's data model
 
-gRPC snapshots populate instantaneous `current_utilization`.
+Eight records in `dr_evt_market.mechanisms` describe the market.
 
-`SessionClient` is the lower-level correlated request wrapper. Most callers
-should use `GrpcPlatform` instead.
+| Type | Meaning |
+|---|---|
+| `Platform` | A cluster as the market sees it: `name`, `total_nodes`, `price_per_node_hour`, `hardware` tags, optional `address`. `cost(num_nodes, limit_s)` is the posted cost. |
+| `Leg` | Part of a job: `leg_id`, `num_nodes`, `limit_s`, `requires` tags. `fits(platform)` needs the tags and the nodes. |
+| `Job` | `job_id`, `submit_s`, `legs`, `bid`. |
+| `Placement` | One way to run a job: a platform per leg, `cost_credits`, `value_credits`; `id` joins the platforms with `+`. |
+| `Window` | One clearing: `time_s`, `index`, `platforms`, `free_nodes`, `jobs`, `candidates` per job. |
+| `Decision` | `job_id`, `placement`, `charge_credits`. |
+| `Rejection` | `job_id`, `reason`, `time_s`, for jobs and for decisions. |
+| `Mechanism` | Abstract base: `name` and `decide(window)`. |
+
+The value model: a job's base cost is its cost on the cheapest placement it can
+use. A `bid` of `1.5` means the job would pay up to one and a half times its
+base cost wherever it runs; value is the same on every placement, so the job
+prefers cheaper platforms unless it says otherwise. A `bid` that is a mapping
+from platform name to multiplier values each platform separately: the value of
+a placement is the sum over legs of the leg's cost on its platform times that
+platform's multiplier, and platforms without a multiplier are not used. A
+placement whose value does not cover its cost is never offered. Whatever the
+mechanism, a winner pays the placement's cost plus a premium, and the premium
+never exceeds value minus cost.
+
+Functions: `placements(job, platforms, free_nodes)` lists every placement whose
+legs have their hardware and fit, together on shared platforms, in the free
+nodes; `base_cost(job, platforms)` gives the cheapest structural placement's
+cost; `build_window(time_s, index, queue, platforms, free_nodes)` offers every
+queued job its placements; `demand(job, placement)` gives the nodes per
+platform; `validate_decisions(window, decisions)` keeps the decisions the window
+can honour in decision order and names each refusal (`duplicate_job`,
+`unknown_job`, `unknown_placement`, `charge_above_value`, `charge_below_cost`,
+`over_capacity`), a refused decision consuming no capacity;
+`submit(decisions, window, sessions, time_s)` sends one batch per platform and
+returns the handle of every leg.
+
+`Vcg` maximizes total net value exactly, one binary per (job, candidate), solved
+to a zero gap, and charges each winner its cost plus the Clarke pivot, the net
+value the other jobs lose because of it, found by solving the window again
+without that job.
 
 ## Running the market
 
-The platform file gives each platform a node count and public hourly node
-price. A blank `address` selects the in-process adapter; a nonblank address
-selects gRPC.
+`platforms.csv` follows DR_EVT's `sync_systems.csv`: `system_id`,
+`total_nodes`, `price_per_node_hour`, an optional `hardware` column of
+space-separated tags, and an optional `address` (blank for in process).
 
 ```text
-system_id,total_nodes,price_per_node_hour,address
-alpha,100,1.0,
-beta,60,2.0,127.0.0.1:50062
+system_id,total_nodes,price_per_node_hour,hardware,address
+alpha,100,1.0,cpu,
+gamma,40,3.0,cpu gpu,127.0.0.1:50062
 ```
 
-The jobs file has one row per leg. Bid columns name acceptable platforms and
-give the private value in credits. Blank bids make that platform unacceptable.
-Rows sharing a job ID form a composite job in file order.
+`jobs.csv` is a DR_EVT trace, `job_submit_time`, `num_nodes`, `time_limit`,
+with a `job_id`, an optional `leg_id` (one row per leg, in order, as in DR_EVT's
+composite format), an optional `requires` column of hardware tags, and the bid:
+either one `bid` column, or one `bid:<platform>` column per platform, blank
+meaning the platform is not bid on.
 
 ```text
-job_id,job_submit_time,num_nodes,time_limit,leg_id,bid:alpha,bid:beta
-job-1,0,20,60,0,10,8
-job-2,30,10,90,left,7,9
-job-2,30,15,90,right,8,10
+job_id,job_submit_time,num_nodes,time_limit,leg_id,requires,bid
+job-1,0,20,60,0,,1.5
+job-2,30,10,90,left,,2.0
+job-2,30,15,90,right,gpu,2.0
 ```
 
-At each fixed window boundary, the controller advances every platform, admits
-arrivals, reads free capacity, asks the mechanism for decisions, validates and
-submits accepted placements, and verifies that every routed leg started at the
-boundary. Unplaced jobs wait for the next window. The run then drains every
-platform.
-
-`Mechanism` is the abstract interface for allocation and charging policies.
-`Vcg` maximizes exact net welfare with Clarke pivot charges for windows of at
-most 800 candidate variables and uses its documented bounded greedy fallback
-for larger windows.
+`Controller(sessions, platforms, mechanism, jobs, *, window_s, seed=0,
+log_dir=None)` clears the market at fixed boundaries. At each boundary it
+advances every platform, admits arrivals, reads free nodes, builds the window,
+asks the mechanism, validates, submits, advances again, and confirms from the
+timing records that every routed leg began at the boundary; a leg that did not
+raises `RoutingError`. Intake rejects jobs that fit nowhere (`oversize`) or whose
+value is below cost on every placement (`unaffordable`); a queue that nothing
+places while every platform is idle is rejected as `unplaceable`. The market
+never uses start times to decide: winners are handed to the platforms they won,
+and the timing records are read back as the outcome. `RunReport` holds
+`routed` (`RoutedLeg`: job, leg, platform, window, handle, cost, value,
+premium, charge, submit, begin, end), `windows` (`WindowRecord`), `rejected`
+(`Rejection`), the platforms' reports and the configuration. `write_outputs`
+writes `routed.csv`, `windows.csv`, `rejected.csv` and `run.json` with the
+platform statistics and the SHA-256 of the two CSVs. With `log_dir` set, one
+`window_NNNNNN.json` per window is written for training.
 
 Run the checked-in examples with:
 
@@ -147,23 +156,59 @@ python -m dr_evt_market run \
   --out market-run --window 60 --mechanism vcg --seed 0
 ```
 
-The output directory receives `routed.csv`, `windows.csv`, `rejected.csv`, and
-`run.json`. The command prints window, routed, and rejected counts followed by
-the SHA-256 hashes of `routed.csv` and `windows.csv`.
+The command prints the window, routed and rejected counts followed by the two
+hashes. For each nonblank address it connects to a gRPC server and uses
+`OUT/servers/<system_id>` as the server-visible work directory; add
+`--start-servers` to launch a local `ServerProcess` at each listed address and
+`--server-binary PATH` to choose the executable. Add `--log-windows` to write
+the window files beside `windows.csv`.
 
-For each nonblank address, the CLI connects to a gRPC server and uses
-`OUT/servers/<system_id>` as the server-visible work directory. Add
-`--start-servers` to launch one local `ServerProcess` at each listed address.
-The optional `--server-binary PATH` selects the executable; otherwise the
-normal `ServerProcess` search rules apply.
+## Learned mechanism
+
+`RegretFormer` is available lazily from `dr_evt_market.mechanisms`; importing
+the package does not import torch. `RegretFormer(None, seed=N)` builds a
+deterministic random network; a checkpoint path loads a trained one. The
+network sees a padded (job, candidate) grid. Its private channel is the
+candidate's value over the job's cheapest candidate cost; five public channels
+follow: normalized cost, `log1p` of nodes, the longest leg limit in hours, the
+smallest `free / (free + demand)` across used platforms, and the number of legs.
+A job's report is its multipliers, one for a single bid or one per platform,
+and every candidate's value is a fixed linear function of them, so a misreport
+is always a report the job could have made.
+
+Deployment sorts candidate cells by allocation probability, accepts feasible
+placements greedily with at most one per job, and charges the greater of cost
+and the learned fraction of value, capped at value. Checkpoints are
+dictionaries written by `torch.save` with `state_dict`, `in_channels`, `hid`,
+`hid_att`, `n_layers`, `n_heads`, `trained_on` and `created`.
+
+`TrainConfig` and `Trainer` support welfare or revenue objectives, a capacity
+penalty, inner misreport ascent, and a single dual variable for an annealed
+regret budget. Windows come from `synthetic_structures` (seeded platforms, jobs
+and multipliers) or from a run made with `--log-windows`:
+
+```bash
+python -m dr_evt_market train --windows synthetic --out regretformer.pt --epochs 20
+python -m dr_evt_market run --jobs jobs.csv --platforms platforms.csv \
+  --out market-run --window 60 --log-windows
+python -m dr_evt_market train --windows market-run --out regretformer.pt --epochs 20
+```
+
+`grid_regret` scales each report dimension separately and then the whole
+report over a fixed grid; `guided_refinement_regret` starts gradient ascent
+from the grid argmax, perturbed and random reports, and rescores every refined
+report through the deployed pipeline. Following You et al. (2026), this is a
+lower bound on true regret, not a proof of incentive compatibility.
 
 ## Testing
 
-After building and installing DR_EVT, run all market package tests with:
+After building and installing DR_EVT, run the market tests with:
 
 ```bash
 ./tests/run_market_tests.sh
 ```
 
-The suite covers both adapters, typed validation, output files, exact parity
-between plain in-process and gRPC scheduling.
+The suite covers both adapters, parity between them, the data model and
+validation, placements and submission, VCG against exhaustive search and
+misreports, the controller on both transports with pinned outputs, and, when
+torch is installed, the window tensor, deployment, regret and training.

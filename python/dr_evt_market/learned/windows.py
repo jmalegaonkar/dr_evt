@@ -5,23 +5,30 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Convert market observations into padded learned-mechanism tensors."""
+"""Turn windows into padded tensors for the learned mechanism.
+
+A job's report is its multipliers: one for a single bid, one per platform for
+a per-platform bid. Each candidate's value is a fixed linear function of those
+multipliers, ``sum_d weight[candidate, d] * multiplier[d]``, where the weight
+is the job's base cost for a single bid and the cost of the legs on that
+platform for a per-platform bid. Misreports scale multipliers, so every
+misreport is a report the job could have made.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import log
-from types import MappingProxyType
 
 import numpy as np
 import torch
 
-from ..mechanisms.base import MarketObservation
+from ..mechanisms.base import Window, demand
 
 PUBLIC_CHANNELS = 5
 IN_CHANNELS = PUBLIC_CHANNELS + 1
-DimensionKey = tuple[str, str, str]
+SINGLE = "*"
 
 
 def _read_only(values: np.ndarray) -> np.ndarray:
@@ -31,7 +38,7 @@ def _read_only(values: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True)
 class ValueSamplingSpec:
-    """Configure synthetic job factors and platform preferences."""
+    """Configure synthetic multipliers: a lognormal factor times a preference."""
 
     lognormal_mean: float = log(2.0)
     lognormal_sigma: float = 0.5
@@ -44,14 +51,12 @@ class ValueSamplingSpec:
         if self.preference_low < 0.0:
             raise ValueError("preference_low must be non-negative")
         if self.preference_high < self.preference_low:
-            raise ValueError(
-                "preference_high must be at least preference_low"
-            )
+            raise ValueError("preference_high must be at least preference_low")
 
 
 @dataclass(frozen=True)
 class WindowStructure:
-    """Store one observation as ragged, immutable NumPy feature arrays."""
+    """One window as ragged, immutable arrays."""
 
     job_ids: tuple[str, ...]
     candidate_ids: tuple[tuple[str, ...], ...]
@@ -60,10 +65,9 @@ class WindowStructure:
     scales: np.ndarray
     capacities: np.ndarray
     platforms: tuple[str, ...]
-    true_values: tuple[np.ndarray, ...]
-    dimension_keys: tuple[tuple[DimensionKey, ...], ...]
+    dimension_keys: tuple[tuple[str, ...], ...]
     dimension_values: tuple[np.ndarray, ...]
-    dimension_map: Mapping[DimensionKey, tuple[int, ...]]
+    dimension_weights: tuple[np.ndarray, ...]
 
     @property
     def n_jobs(self) -> int:
@@ -73,333 +77,207 @@ class WindowStructure:
     @property
     def max_candidates(self) -> int:
         """Return the largest candidate count among the jobs."""
-        return max((len(candidates) for candidates in self.candidate_ids), default=0)
-
-    @property
-    def max_slots(self) -> int:
-        """Return the largest candidate count using network slot terminology."""
-        return self.max_candidates
+        return max((len(ids) for ids in self.candidate_ids), default=0)
 
     @property
     def max_dimensions(self) -> int:
-        """Return the largest report-dimension count among the jobs."""
+        """Return the largest report dimension count among the jobs."""
         return max((len(keys) for keys in self.dimension_keys), default=0)
 
+    def true_values(self, job_index: int) -> np.ndarray:
+        """Return the candidate values of one job under its true multipliers."""
+        return self.dimension_weights[job_index] @ self.dimension_values[job_index]
 
-def structure_from_observation(obs: MarketObservation) -> WindowStructure:
-    """Build the immutable public structure and truthful values of a window."""
-    platforms = tuple(sorted(obs.free_nodes))
+
+def structure_from_window(window: Window) -> WindowStructure:
+    """Build the public structure and the true multipliers of a window."""
+    platforms = tuple(sorted(window.platforms))
     platform_index = {name: index for index, name in enumerate(platforms)}
-    capacities = _read_only(np.asarray(
-        [obs.free_nodes[name] for name in platforms],
-        dtype=np.float32,
-    ))
-    candidate_ids = []
-    public_channels = []
-    demands = []
-    scales = []
-    true_values = []
-    dimension_keys = []
-    dimension_values = []
-    dimension_map: dict[DimensionKey, tuple[int, ...]] = {}
-
-    for offer in obs.jobs:
-        bid_by_leg = {leg.leg_id: leg for leg in obs.bids[offer.job_id].legs}
-        costs = [candidate.resource_cost_credits for candidate in offer.candidates]
+    capacities = _read_only(
+        np.asarray([window.free_nodes[name] for name in platforms], dtype=np.float32)
+    )
+    candidate_ids, channels, demands, scales = [], [], [], []
+    dimension_keys, dimension_values, dimension_weights = [], [], []
+    for job in window.jobs:
+        candidates = window.candidates[job.job_id]
+        costs = [candidate.cost_credits for candidate in candidates]
         scale = max(min(costs, default=0.0), 1.0e-9)
         scales.append(scale)
-
-        keys = tuple(
-            (offer.job_id, leg.leg_id, platform)
-            for leg in offer.legs
-            for platform in bid_by_leg[leg.leg_id].value_by_platform
-        )
-        key_index = {key: index for index, key in enumerate(keys)}
-        dimension_keys.append(keys)
-        dimension_values.append(_read_only(np.asarray(
-            [
-                bid_by_leg[leg_id].value_by_platform[platform]
-                for _, leg_id, platform in keys
-            ],
-            dtype=np.float32,
-        )))
-
-        rows = []
-        demand_rows = []
-        values = []
-        candidates_by_dimension = {key: [] for key in keys}
-        for candidate_index, candidate in enumerate(offer.candidates):
-            demand = np.zeros(len(platforms), dtype=np.float32)
-            for platform, nodes in candidate.demand_by_platform.items():
-                demand[platform_index[platform]] = float(nodes)
-            demand_rows.append(demand)
-
-            free_shares = [
-                obs.free_nodes[platform]
-                / (obs.free_nodes[platform] + nodes)
-                for platform, nodes in candidate.demand_by_platform.items()
+        if isinstance(job.bid, Mapping):
+            keys = tuple(sorted(job.bid))
+            multipliers = np.asarray([job.bid[key] for key in keys], dtype=np.float32)
+        else:
+            keys = (SINGLE,)
+            multipliers = np.asarray([job.bid], dtype=np.float32)
+        rows, demand_rows, weight_rows = [], [], []
+        for candidate in candidates:
+            nodes = demand(job, candidate)
+            demand_row = np.zeros(len(platforms), dtype=np.float32)
+            for name, count in nodes.items():
+                demand_row[platform_index[name]] = float(count)
+            demand_rows.append(demand_row)
+            shares = [
+                window.free_nodes[name] / (window.free_nodes[name] + count)
+                for name, count in nodes.items()
             ]
-            rows.append((
-                candidate.resource_cost_credits / scale,
-                np.log1p(demand.sum()),
-                max(leg.limit_s for leg in offer.legs) / 3600.0,
-                min(free_shares),
-                float(len(offer.legs)),
-            ))
-            value = obs.bids[offer.job_id].value_of(candidate)
-            if value is None:
-                raise ValueError(
-                    f"job {offer.job_id!r} has an unacceptable candidate"
+            rows.append(
+                (
+                    candidate.cost_credits / scale,
+                    np.log1p(demand_row.sum()),
+                    max(leg.limit_s for leg in job.legs) / 3600.0,
+                    min(shares),
+                    float(len(job.legs)),
                 )
-            values.append(value)
-            for leg_id, platform in candidate.platform_by_leg.items():
-                key = (offer.job_id, leg_id, platform)
-                candidates_by_dimension[key].append(candidate_index)
-                if key not in key_index:
-                    raise ValueError(f"candidate uses unknown report dimension {key!r}")
-
-        candidate_ids.append(tuple(
-            candidate.placement_id for candidate in offer.candidates
-        ))
-        public_channels.append(_read_only(np.asarray(
-            rows,
-            dtype=np.float32,
-        ).reshape(len(rows), PUBLIC_CHANNELS)))
-        demands.append(_read_only(np.asarray(
-            demand_rows,
-            dtype=np.float32,
-        ).reshape(len(demand_rows), len(platforms))))
-        true_values.append(_read_only(np.asarray(values, dtype=np.float32)))
-        dimension_map.update({
-            key: tuple(indices)
-            for key, indices in candidates_by_dimension.items()
-        })
-
+            )
+            weights = np.zeros(len(keys), dtype=np.float32)
+            if isinstance(job.bid, Mapping):
+                for leg, name in zip(job.legs, candidate.platforms):
+                    weights[keys.index(name)] += window.platforms[name].cost(
+                        leg.num_nodes, leg.limit_s
+                    )
+            elif job.bid > 0.0:
+                weights[0] = candidate.value_credits / job.bid
+            weight_rows.append(weights)
+        candidate_ids.append(tuple(candidate.id for candidate in candidates))
+        channels.append(
+            _read_only(
+                np.asarray(rows, dtype=np.float32).reshape(len(rows), PUBLIC_CHANNELS)
+            )
+        )
+        demands.append(
+            _read_only(
+                np.asarray(demand_rows, dtype=np.float32).reshape(
+                    len(demand_rows), len(platforms)
+                )
+            )
+        )
+        dimension_keys.append(keys)
+        dimension_values.append(_read_only(multipliers))
+        dimension_weights.append(
+            _read_only(
+                np.asarray(weight_rows, dtype=np.float32).reshape(
+                    len(weight_rows), len(keys)
+                )
+            )
+        )
     return WindowStructure(
-        tuple(offer.job_id for offer in obs.jobs),
+        tuple(job.job_id for job in window.jobs),
         tuple(candidate_ids),
-        tuple(public_channels),
+        tuple(channels),
         tuple(demands),
         _read_only(np.asarray(scales, dtype=np.float32)),
         capacities,
         platforms,
-        tuple(true_values),
         tuple(dimension_keys),
         tuple(dimension_values),
-        MappingProxyType(dimension_map),
+        tuple(dimension_weights),
     )
 
 
 class WindowBatch:
-    """Pad window structures into tensors while retaining validity masks."""
+    """Pad window structures into tensors with validity masks."""
 
     def __init__(
         self,
         structures: Sequence[WindowStructure],
         device: str | torch.device = "cpu",
     ) -> None:
-        """Build tensors for one non-empty sequence of window structures."""
+        """Build the tensors of one non-empty batch of windows."""
         if not structures:
             raise ValueError("WindowBatch requires at least one structure")
         self.structures = tuple(structures)
         self.device = torch.device(device)
-        self.platforms = tuple(sorted({
-            platform
-            for structure in structures
-            for platform in structure.platforms
-        }))
+        self.platforms = tuple(
+            sorted({name for structure in structures for name in structure.platforms})
+        )
         platform_index = {name: index for index, name in enumerate(self.platforms)}
-        batch_size = len(structures)
-        n_jobs = max(structure.n_jobs for structure in structures)
-        n_candidates = max(
-            max(structure.max_candidates, 1) for structure in structures
-        )
-        n_dimensions = max(
-            max(structure.max_dimensions, 1) for structure in structures
-        )
-
-        self.job_mask = torch.zeros(
-            batch_size,
-            n_jobs,
-            dtype=torch.bool,
-            device=self.device,
-        )
-        self.candidate_mask = torch.zeros(
-            batch_size,
-            n_jobs,
-            n_candidates,
-            dtype=torch.bool,
-            device=self.device,
-        )
-        self.dimension_mask = torch.zeros(
-            batch_size,
-            n_jobs,
-            n_dimensions,
-            dtype=torch.bool,
-            device=self.device,
-        )
-        self.public_channels = torch.zeros(
-            batch_size,
-            n_jobs,
-            n_candidates,
-            PUBLIC_CHANNELS,
-            device=self.device,
-        )
-        self.demands = torch.zeros(
-            batch_size,
-            n_jobs,
-            n_candidates,
-            len(self.platforms),
-            device=self.device,
-        )
-        self.capacities = torch.zeros(
-            batch_size,
-            len(self.platforms),
-            device=self.device,
-        )
-        self.scales = torch.zeros(
-            batch_size,
-            n_jobs,
-            device=self.device,
-        )
-        self.dimension_values = torch.zeros(
-            batch_size,
-            n_jobs,
-            n_dimensions,
-            device=self.device,
-        )
-        self.dimension_use = torch.zeros(
-            batch_size,
-            n_jobs,
-            n_candidates,
-            n_dimensions,
-            device=self.device,
-        )
-
-        for batch_index, structure in enumerate(structures):
-            local_platforms = [platform_index[name] for name in structure.platforms]
-            self.capacities[batch_index, local_platforms] = torch.tensor(
-                structure.capacities,
-                dtype=torch.float32,
-                device=self.device,
+        b = len(structures)
+        n = max(structure.n_jobs for structure in structures)
+        s = max(max(structure.max_candidates, 1) for structure in structures)
+        d = max(max(structure.max_dimensions, 1) for structure in structures)
+        p = len(self.platforms)
+        zeros = lambda *shape, **kw: torch.zeros(*shape, device=self.device, **kw)
+        self.job_mask = zeros(b, n, dtype=torch.bool)
+        self.candidate_mask = zeros(b, n, s, dtype=torch.bool)
+        self.dimension_mask = zeros(b, n, d, dtype=torch.bool)
+        self.public_channels = zeros(b, n, s, PUBLIC_CHANNELS)
+        self.demands = zeros(b, n, s, p)
+        self.capacities = zeros(b, p)
+        self.scales = zeros(b, n)
+        self.dimension_values = zeros(b, n, d)
+        self.dimension_weights = zeros(b, n, s, d)
+        for i, structure in enumerate(structures):
+            local = [platform_index[name] for name in structure.platforms]
+            self.capacities[i, local] = torch.tensor(
+                structure.capacities, device=self.device
             )
-            for job_index in range(structure.n_jobs):
-                candidate_count = len(structure.candidate_ids[job_index])
-                dimension_count = len(structure.dimension_keys[job_index])
-                self.job_mask[batch_index, job_index] = True
-                self.candidate_mask[
-                    batch_index,
-                    job_index,
-                    :candidate_count,
-                ] = True
-                self.dimension_mask[
-                    batch_index,
-                    job_index,
-                    :dimension_count,
-                ] = True
-                self.public_channels[
-                    batch_index,
-                    job_index,
-                    :candidate_count,
-                ] = torch.tensor(
-                    structure.public_channels[job_index],
-                    dtype=torch.float32,
-                    device=self.device,
+            for j in range(structure.n_jobs):
+                c = len(structure.candidate_ids[j])
+                k = len(structure.dimension_keys[j])
+                self.job_mask[i, j] = True
+                self.candidate_mask[i, j, :c] = True
+                self.dimension_mask[i, j, :k] = True
+                self.public_channels[i, j, :c] = torch.tensor(
+                    structure.public_channels[j], device=self.device
                 )
-                local_demand = torch.tensor(
-                    structure.demands[job_index],
-                    dtype=torch.float32,
-                    device=self.device,
+                self.demands[i, j, :c, local] = torch.tensor(
+                    structure.demands[j], device=self.device
                 )
-                self.demands[
-                    batch_index,
-                    job_index,
-                    :candidate_count,
-                    local_platforms,
-                ] = local_demand
-                self.scales[batch_index, job_index] = float(
-                    structure.scales[job_index]
+                self.scales[i, j] = float(structure.scales[j])
+                self.dimension_values[i, j, :k] = torch.tensor(
+                    structure.dimension_values[j], device=self.device
                 )
-                self.dimension_values[
-                    batch_index,
-                    job_index,
-                    :dimension_count,
-                ] = torch.tensor(
-                    structure.dimension_values[job_index],
-                    dtype=torch.float32,
-                    device=self.device,
+                self.dimension_weights[i, j, :c, :k] = torch.tensor(
+                    structure.dimension_weights[j], device=self.device
                 )
-                for dimension_index, key in enumerate(
-                    structure.dimension_keys[job_index]
-                ):
-                    for candidate_index in structure.dimension_map[key]:
-                        self.dimension_use[
-                            batch_index,
-                            job_index,
-                            candidate_index,
-                            dimension_index,
-                        ] = 1.0
         self.true_values = self.candidate_values(self.dimension_values)
 
     @property
     def in_channels(self) -> int:
-        """Return the private plus public network channel count."""
+        """Return the private plus public channel count."""
         return IN_CHANNELS
 
     @property
     def slot_mask(self) -> torch.Tensor:
-        """Return the candidate mask under the network's slot terminology."""
+        """Return the candidate mask under the network's slot name."""
         return self.candidate_mask
 
     @property
     def demand(self) -> torch.Tensor:
-        """Return candidate demand under the deployment API's singular name."""
+        """Return the candidate demands under the deployment API's name."""
         return self.demands
 
-    def candidate_values(
-        self,
-        dimension_values: torch.Tensor,
-    ) -> torch.Tensor:
-        """Sum the report dimensions used by each candidate placement."""
+    def candidate_values(self, dimension_values: torch.Tensor) -> torch.Tensor:
+        """Return every candidate's value under the given multipliers."""
         if dimension_values.shape != self.dimension_values.shape:
             raise ValueError(
-                "dimension_values must have shape "
-                f"{tuple(self.dimension_values.shape)}"
+                f"dimension_values must have shape {tuple(self.dimension_values.shape)}"
             )
         values = (
-            self.dimension_use.to(dimension_values.dtype)
+            self.dimension_weights.to(dimension_values.dtype)
             * dimension_values.unsqueeze(2)
         ).sum(dim=-1)
         return values * self.candidate_mask.to(values.dtype)
-
-    def input_tensor(self, values: torch.Tensor) -> torch.Tensor:
-        """Build the private-value plus five-public-channel network input."""
-        if values.shape != self.true_values.shape:
-            raise ValueError(
-                f"values must have shape {tuple(self.true_values.shape)}"
-            )
-        normalized = values / self.scales.unsqueeze(-1).clamp_min(1.0e-9)
-        inputs = torch.cat(
-            (normalized.unsqueeze(-1), self.public_channels),
-            dim=-1,
-        )
-        return inputs * self.candidate_mask.unsqueeze(-1).to(inputs.dtype)
 
     def values_from_factors(
         self,
         dimension_values: torch.Tensor,
         factors: torch.Tensor,
     ) -> torch.Tensor:
-        """Scale report dimensions and sum their leg values per candidate."""
-        if dimension_values.shape != self.dimension_values.shape:
+        """Return candidate values after scaling the multipliers by factors."""
+        if factors.shape != self.dimension_mask.shape:
             raise ValueError(
-                "dimension_values must have shape "
-                f"{tuple(self.dimension_values.shape)}"
+                f"factors must have shape {tuple(self.dimension_mask.shape)}"
             )
-        expected = self.dimension_mask.shape
-        if factors.shape != expected:
-            raise ValueError(f"factors must have shape {tuple(expected)}")
         return self.candidate_values(dimension_values * factors)
+
+    def input_tensor(self, values: torch.Tensor) -> torch.Tensor:
+        """Build the network input: value over scale, then the public channels."""
+        if values.shape != self.true_values.shape:
+            raise ValueError(f"values must have shape {tuple(self.true_values.shape)}")
+        normalized = values / self.scales.unsqueeze(-1).clamp_min(1.0e-9)
+        inputs = torch.cat((normalized.unsqueeze(-1), self.public_channels), dim=-1)
+        return inputs * self.candidate_mask.unsqueeze(-1).to(inputs.dtype)
 
 
 def sample_values(
@@ -407,32 +285,33 @@ def sample_values(
     rng: np.random.Generator,
     spec: ValueSamplingSpec,
 ) -> tuple[tuple[np.ndarray, ...], ...]:
-    """Sample one value per report dimension.
-
-    Each job draws one lognormal factor over its cheapest candidate cost. Each
-    ``(leg, platform)`` dimension independently draws a uniform preference
-    multiplier. The job factor times the preference is divided equally across
-    the job's legs.
-    """
-    sampled_structures = []
+    """Sample multipliers: one lognormal factor per job times a preference per
+    report dimension, both seeded."""
+    sampled = []
     for structure in structures:
-        sampled_jobs = []
-        for job_index, keys in enumerate(structure.dimension_keys):
-            factor = float(rng.lognormal(
-                mean=spec.lognormal_mean,
-                sigma=spec.lognormal_sigma,
-            ))
-            leg_count = len({leg_id for _, leg_id, _ in keys})
-            dimension_values = np.asarray([
-                structure.scales[job_index]
-                * factor
-                * float(rng.uniform(
-                    spec.preference_low,
-                    spec.preference_high,
-                ))
-                / max(leg_count, 1)
-                for _ in keys
-            ], dtype=np.float32)
-            sampled_jobs.append(dimension_values)
-        sampled_structures.append(tuple(sampled_jobs))
-    return tuple(sampled_structures)
+        jobs = []
+        for keys in structure.dimension_keys:
+            factor = float(rng.lognormal(spec.lognormal_mean, spec.lognormal_sigma))
+            jobs.append(
+                np.asarray(
+                    [
+                        factor
+                        * float(rng.uniform(spec.preference_low, spec.preference_high))
+                        for _ in keys
+                    ],
+                    dtype=np.float32,
+                )
+            )
+        sampled.append(tuple(jobs))
+    return tuple(sampled)
+
+
+__all__ = [
+    "IN_CHANNELS",
+    "PUBLIC_CHANNELS",
+    "ValueSamplingSpec",
+    "WindowBatch",
+    "WindowStructure",
+    "sample_values",
+    "structure_from_window",
+]

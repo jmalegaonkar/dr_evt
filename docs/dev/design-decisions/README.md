@@ -11,6 +11,8 @@ This directory contains architectural decisions and design rationales for DR_EVT
 - **[Simulation vs Replay Modes](SIMULATION_VS_REPLAY_MODES.md)** - Why we have two distinct operating modes and how they differ
 - **[Timezone Support](TIMEZONE_SUPPORT.md)** - How timezone handling works for ISO timestamp traces
 - **[Experimental Trace Types](EXPERIMENTAL_TRACE_TYPES.md)** - How specialized trace records avoid overhead in the standard data model
+- **[Market Research Directions](MARKET_RESEARCH_DIRECTIONS.md)** - Where the federated market over DR_EVT can go as a research project
+- **[Market Paper Plan](MARKET_PAPER_PLAN.md)** - The paper plan built on the chosen directions
 
 ```{toctree}
 :maxdepth: 1
@@ -19,6 +21,8 @@ CIRCULAR_QUEUE
 SIMULATION_VS_REPLAY_MODES
 TIMEZONE_SUPPORT
 EXPERIMENTAL_TRACE_TYPES
+MARKET_RESEARCH_DIRECTIONS
+MARKET_PAPER_PLAN
 ```
 
 ## Purpose

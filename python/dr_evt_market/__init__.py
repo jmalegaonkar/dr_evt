@@ -5,18 +5,34 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Public contract for DR_EVT-backed market platform adapters."""
+"""A market over DR_EVT clusters: the platform contract, the auction, the loop."""
 
 from .controller import (
     Controller,
-    RejectedJob,
     RoutedLeg,
-    RoutingInvariantViolation,
+    RoutingError,
     RunReport,
     WindowRecord,
     write_outputs,
 )
-from .inputs import PlatformSpec, read_jobs, read_platforms
+from .inputs import read_jobs, read_platforms
+from .mechanisms import (
+    Decision,
+    Job,
+    Leg,
+    Mechanism,
+    Placement,
+    Platform,
+    Rejection,
+    Vcg,
+    Window,
+    base_cost,
+    build_window,
+    demand,
+    placements,
+    submit,
+    validate_decisions,
+)
 from .platforms.base import (
     ClockViolation,
     ConfigurationError,
@@ -29,36 +45,48 @@ from .platforms.base import (
     SubmitRequest,
     validate,
 )
-from .platforms.inprocess import InProcessPlatform
 from .platforms.grpc import GrpcPlatform, SessionClient
+from .platforms.inprocess import InProcessPlatform
 from .platforms.server import ServerProcess
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "__version__",
     "ClockViolation",
     "ConfigurationError",
     "Controller",
-    "InfrastructureFailure",
+    "Decision",
     "GrpcPlatform",
     "InProcessPlatform",
+    "InfrastructureFailure",
+    "Job",
     "JobTiming",
+    "Leg",
+    "Mechanism",
+    "Placement",
+    "Platform",
     "PlatformReport",
     "PlatformSession",
     "PlatformSnapshot",
-    "PlatformSpec",
-    "RejectedJob",
+    "Rejection",
     "RoutedLeg",
-    "RoutingInvariantViolation",
+    "RoutingError",
     "RunReport",
     "ServerProcess",
     "SessionClient",
     "StructuralRejection",
     "SubmitRequest",
+    "Vcg",
+    "Window",
     "WindowRecord",
+    "base_cost",
+    "build_window",
+    "demand",
+    "placements",
     "read_jobs",
     "read_platforms",
+    "submit",
     "validate",
+    "validate_decisions",
     "write_outputs",
 ]

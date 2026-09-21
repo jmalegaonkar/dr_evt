@@ -5,7 +5,9 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Command line entry point for fixed-window DR_EVT market runs."""
+"""Command line: run a market, or train the learned mechanism."""
+
+from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
@@ -14,8 +16,8 @@ from pathlib import Path
 import sys
 
 from .controller import Controller, write_outputs
-from .inputs import PlatformSpec, read_jobs, read_platforms
-from .mechanisms import Mechanism, Vcg
+from .inputs import read_jobs, read_platforms
+from .mechanisms import Mechanism, Platform, Vcg
 from .platforms.base import PlatformSession
 
 
@@ -49,67 +51,54 @@ def _mechanism(name: str) -> Mechanism:
     raise ValueError(f"unknown mechanism {name!r}")
 
 
-def _platform(
-    spec: PlatformSpec,
-    out_dir: Path,
-) -> PlatformSession:
-    if spec.address:
+def _session(platform: Platform, out_dir: Path) -> PlatformSession:
+    if platform.address:
         from .platforms.grpc import GrpcPlatform
 
         return GrpcPlatform(
-            spec.system_id,
-            spec.total_nodes,
-            spec.address,
-            out_dir / "servers" / spec.system_id,
-            session_name=spec.system_id,
+            platform.name,
+            platform.total_nodes,
+            platform.address,
+            out_dir / "servers" / platform.name,
+            session_name=platform.name,
         )
-
     from .platforms.inprocess import InProcessPlatform
 
     return InProcessPlatform(
-        spec.system_id,
-        spec.total_nodes,
-        out_dir / "platforms" / spec.system_id,
+        platform.name, platform.total_nodes, out_dir / "platforms" / platform.name
     )
 
 
 def _run(args: argparse.Namespace) -> int:
     out_dir = args.out.resolve()
-    specs = read_platforms(args.platforms)
-    jobs, bids = read_jobs(args.jobs, specs)
-    prices = {
-        spec.system_id: spec.price_per_node_hour
-        for spec in specs
-    }
-
+    platforms = {platform.name: platform for platform in read_platforms(args.platforms)}
+    jobs = read_jobs(args.jobs)
     with ExitStack() as stack:
         if args.start_servers:
             from .platforms.server import ServerProcess
 
-            for spec in specs:
-                if spec.address:
-                    stack.enter_context(ServerProcess(
-                        args.server_binary,
-                        out_dir / "servers" / spec.system_id,
-                        address=spec.address,
-                    ))
-
-        platforms = {
-            spec.system_id: _platform(spec, out_dir)
-            for spec in specs
+            for platform in platforms.values():
+                if platform.address:
+                    stack.enter_context(
+                        ServerProcess(
+                            args.server_binary,
+                            out_dir / "servers" / platform.name,
+                            address=platform.address,
+                        )
+                    )
+        sessions = {
+            name: _session(platform, out_dir) for name, platform in platforms.items()
         }
         report = Controller(
+            sessions,
             platforms,
-            prices,
             _mechanism(args.mechanism),
             jobs,
-            bids,
             window_s=args.window,
             seed=args.seed,
             log_dir=out_dir if args.log_windows else None,
         ).run()
         paths = write_outputs(report, out_dir)
-
     print(f"windows={len(report.windows)}")
     print(f"routed={len(report.routed)}")
     print(f"rejected={len(report.rejected)}")
@@ -127,10 +116,7 @@ def _train(args: argparse.Namespace) -> int:
         structures = synthetic_structures(20, seed=args.seed)
     else:
         structures = harvest_structures(Path(args.windows))
-    trainer = Trainer(
-        TrainConfig(epochs=args.epochs, seed=args.seed),
-        structures,
-    )
+    trainer = Trainer(TrainConfig(epochs=args.epochs, seed=args.seed), structures)
     history = trainer.train()
     checkpoint = trainer.save(args.out)
     print(f"epochs={len(history['epochs'])}")
@@ -139,20 +125,14 @@ def _train(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Parse command line arguments and run the selected command."""
-    parser = _parser()
-    args = parser.parse_args(argv)
-    if args.command == "run":
-        try:
+    """Parse the command line and run the selected command."""
+    args = _parser().parse_args(argv)
+    try:
+        if args.command == "run":
             return _run(args)
-        except ValueError as error:
-            print(f"error: {error}", file=sys.stderr)
-            return 2
-    if args.command == "train":
-        try:
+        if args.command == "train":
             return _train(args)
-        except ValueError as error:
-            print(f"error: {error}", file=sys.stderr)
-            return 2
-    parser.error(f"unknown command {args.command!r}")
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     return 2

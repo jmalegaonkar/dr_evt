@@ -5,19 +5,29 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""RegretFormer deployment as a market mechanism.
+"""RegretFormer as a mechanism: a network over the (job, candidate) grid.
 
 Checkpoints are dictionaries written by ``torch.save`` with ``state_dict``,
-``in_channels``, ``hid``, ``hid_att``, ``n_layers``, ``n_heads``, ``trained_on``,
-and ``created`` entries. ``trained_on`` is free text and ``created`` is an ISO
-date.
+``in_channels``, ``hid``, ``hid_att``, ``n_layers``, ``n_heads``,
+``trained_on`` (free text) and ``created`` (an ISO date).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from .base import Decision, MarketObservation, Mechanism
+from .base import Decision, Mechanism, Window
+
+_CHECKPOINT_FIELDS = {
+    "state_dict",
+    "in_channels",
+    "hid",
+    "hid_att",
+    "n_layers",
+    "n_heads",
+    "trained_on",
+    "created",
+}
 
 
 class RegretFormer(Mechanism):
@@ -36,64 +46,43 @@ class RegretFormer(Mechanism):
         seed: int = 0,
         device: str = "cpu",
     ) -> None:
-        """Build a seeded network or load its architecture and parameters."""
+        """Build a seeded random network or load a checkpoint."""
         import torch
 
         from ..learned import deploy, net, windows
 
-        self._torch = torch
-        self._deploy = deploy
-        self._net = net
-        self._windows = windows
+        self._torch, self._deploy, self._windows = torch, deploy, windows
         if not isinstance(seed, int) or isinstance(seed, bool):
             raise ValueError("seed must be an integer")
         self.seed = seed
-        self.device = self._torch.device(device)
-        self._torch.manual_seed(seed)
-
+        self.device = torch.device(device)
+        torch.manual_seed(seed)
         state_dict = None
         self.trained_on = "random initialization"
         self.created = None
+        in_channels = windows.IN_CHANNELS
         if checkpoint is not None:
-            checkpoint_path = Path(checkpoint)
-            payload = self._torch.load(
-                checkpoint_path,
-                map_location=self.device,
-                weights_only=True,
+            payload = torch.load(
+                Path(checkpoint), map_location=self.device, weights_only=True
             )
-            required = {
-                "state_dict",
-                "in_channels",
-                "hid",
-                "hid_att",
-                "n_layers",
-                "n_heads",
-                "trained_on",
-                "created",
-            }
-            available = set(payload) if isinstance(payload, dict) else set()
-            if not required <= available:
-                missing = sorted(required - available)
-                raise ValueError(
-                    f"checkpoint is missing fields: {', '.join(missing)}"
-                )
-            in_channels = int(payload["in_channels"])
-            hid = int(payload["hid"])
-            hid_att = int(payload["hid_att"])
-            n_layers = int(payload["n_layers"])
-            n_heads = int(payload["n_heads"])
-            self.trained_on = str(payload["trained_on"])
-            self.created = str(payload["created"])
+            missing = sorted(
+                _CHECKPOINT_FIELDS - set(payload if isinstance(payload, dict) else ())
+            )
+            if missing:
+                raise ValueError(f"checkpoint is missing fields: {', '.join(missing)}")
+            in_channels, hid, hid_att = (
+                int(payload["in_channels"]),
+                int(payload["hid"]),
+                int(payload["hid_att"]),
+            )
+            n_layers, n_heads = int(payload["n_layers"]), int(payload["n_heads"])
+            self.trained_on, self.created = str(payload["trained_on"]), str(
+                payload["created"]
+            )
             state_dict = payload["state_dict"]
-        else:
-            in_channels = self._windows.IN_CHANNELS
-
-        self.in_channels = in_channels
-        self.hid = hid
-        self.hid_att = hid_att
-        self.n_layers = n_layers
-        self.n_heads = n_heads
-        self.net = self._net.RegretFormerNet(
+        self.in_channels, self.hid, self.hid_att = in_channels, hid, hid_att
+        self.n_layers, self.n_heads = n_layers, n_heads
+        self.net = net.RegretFormerNet(
             in_channels=in_channels,
             hid=hid,
             hid_att=hid_att,
@@ -104,37 +93,29 @@ class RegretFormer(Mechanism):
             self.net.load_state_dict(state_dict)
         self.net.eval()
 
-    def decide(self, obs: MarketObservation) -> list[Decision]:
+    def decide(self, window: Window) -> list[Decision]:
         """Round one network pass into feasible, individually rational decisions."""
-        if not obs.jobs:
+        if not window.jobs:
             return []
-        structure = self._windows.structure_from_observation(obs)
+        structure = self._windows.structure_from_window(window)
         batch = self._windows.WindowBatch((structure,), self.device)
         assignments, payments = self._deploy.deployed_outcome(
-            self.net,
-            batch,
-            batch.true_values,
+            self.net, batch, batch.true_values
         )
         decisions = []
         for job_index, candidate_index in enumerate(assignments[0]):
             if candidate_index < 0:
                 continue
-            job_id = structure.job_ids[job_index]
-            placement_id = structure.candidate_ids[job_index][candidate_index]
-            candidate = obs.candidate(job_id, placement_id)
-            value = obs.value(job_id, placement_id)
-            if value is None or value < candidate.resource_cost_credits:
+            job = window.jobs[job_index]
+            placement = window.candidates[job.job_id][candidate_index]
+            if placement.value_credits < placement.cost_credits:
                 continue
             charge = min(
-                value,
-                max(
-                    candidate.resource_cost_credits,
-                    float(payments[0, job_index]),
-                ),
+                placement.value_credits,
+                max(placement.cost_credits, float(payments[0, job_index])),
             )
-            decisions.append(Decision(
-                job_id,
-                placement_id,
-                charge,
-            ))
+            decisions.append(Decision(job.job_id, placement, charge))
         return decisions
+
+
+__all__ = ["RegretFormer"]

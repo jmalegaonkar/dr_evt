@@ -5,89 +5,20 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Generate deterministic synthetic market windows for learned mechanisms.
+"""Seeded synthetic windows for training and tests.
 
-Each window has three platforms with uniformly sampled capacities and prices,
-two to five jobs, and one or two legs per job. Node demands and limits are
-uniform. Job values use the lognormal job factor and independent uniform
-``(leg, platform)`` preferences documented by ``sample_values``.
+Each window has three platforms with uniform capacities and prices, one of
+them with a ``gpu`` tag, and two to five jobs of one or two legs. A fifth of
+the legs require ``gpu``. Half of the jobs bid one multiplier, the other half
+one multiplier per platform; multipliers come from ``sample_values``.
 """
 
 from __future__ import annotations
 
-from itertools import product
-
 import numpy as np
 
-from ..mechanisms.base import (
-    JobBid,
-    JobOffer,
-    LegBid,
-    LegSpec,
-    MarketObservation,
-    Placement,
-)
-from .windows import (
-    ValueSamplingSpec,
-    WindowStructure,
-    sample_values,
-    structure_from_observation,
-)
-
-
-def _offers(
-    window_index: int,
-    capacities: dict[str, int],
-    prices: dict[str, float],
-    rng: np.random.Generator,
-    n_jobs: int,
-) -> tuple[tuple[JobOffer, ...], dict[str, JobBid]]:
-    platform_names = tuple(sorted(capacities))
-    offers = []
-    bids = {}
-    for job_index in range(n_jobs):
-        job_id = f"w{window_index:04d}-j{job_index:03d}"
-        n_legs = 2 if float(rng.random()) < 0.25 else 1
-        max_nodes = max(1, min(capacities.values()) // (2 * n_legs))
-        legs = tuple(
-            LegSpec(
-                str(leg_index),
-                int(rng.integers(1, max_nodes + 1)),
-                int(rng.integers(1, 25)) * 300,
-            )
-            for leg_index in range(n_legs)
-        )
-        candidates = []
-        for assignment in product(platform_names, repeat=n_legs):
-            demand: dict[str, int] = {}
-            cost = 0.0
-            platforms_by_leg = {}
-            for leg, platform in zip(legs, assignment):
-                platforms_by_leg[leg.leg_id] = platform
-                demand[platform] = demand.get(platform, 0) + leg.num_nodes
-                cost += (
-                    prices[platform]
-                    * leg.num_nodes
-                    * leg.limit_s
-                    / 3600.0
-                )
-            if any(nodes > capacities[name] for name, nodes in demand.items()):
-                continue
-            candidates.append(Placement(
-                "+".join(assignment),
-                platforms_by_leg,
-                demand,
-                cost,
-            ))
-        offers.append(JobOffer(job_id, 0, legs, tuple(candidates)))
-        bids[job_id] = JobBid(
-            job_id,
-            tuple(
-                LegBid(leg.leg_id, {name: 1.0 for name in platform_names})
-                for leg in legs
-            ),
-        )
-    return tuple(offers), bids
+from ..mechanisms import Job, Leg, Platform, build_window
+from .windows import ValueSamplingSpec, WindowStructure, structure_from_window
 
 
 def synthetic_structures(
@@ -96,69 +27,51 @@ def synthetic_structures(
     seed: int = 0,
     value_spec: ValueSamplingSpec | None = None,
 ) -> list[WindowStructure]:
-    """Generate seeded platform, job, placement, and value structures."""
+    """Generate seeded windows with sampled multipliers."""
     if count < 1:
         raise ValueError("count must be positive")
     rng = np.random.default_rng(seed)
     spec = value_spec or ValueSamplingSpec()
     structures = []
-    for window_index in range(count):
-        platform_names = ("alpha", "beta", "gamma")
-        capacities = {
-            name: int(rng.integers(32, 129))
-            for name in platform_names
-        }
-        prices = {
-            name: float(rng.uniform(0.5, 3.0))
-            for name in platform_names
-        }
-        offers, placeholder_bids = _offers(
-            window_index,
-            capacities,
-            prices,
-            rng,
-            int(rng.integers(2, 6)),
-        )
-        placeholder = MarketObservation(
-            0,
-            window_index,
-            seed,
-            offers,
-            placeholder_bids,
-            capacities,
-        )
-        draft = structure_from_observation(placeholder)
-        sampled = sample_values((draft,), rng, spec)[0]
-        bids = {}
-        for job_index, offer in enumerate(offers):
-            values = {
-                key: float(sampled[job_index][dimension_index])
-                for dimension_index, key in enumerate(
-                    draft.dimension_keys[job_index]
-                )
-            }
-            bids[offer.job_id] = JobBid(
-                offer.job_id,
-                tuple(
-                    LegBid(
-                        leg.leg_id,
-                        {
-                            platform: values[
-                                (offer.job_id, leg.leg_id, platform)
-                            ]
-                            for platform in platform_names
-                        },
-                    )
-                    for leg in offer.legs
-                ),
+    for index in range(count):
+        platforms = {
+            name: Platform(
+                name,
+                int(rng.integers(32, 129)),
+                float(rng.uniform(0.5, 3.0)),
+                frozenset({"cpu", "gpu"} if name == "gamma" else {"cpu"}),
             )
-        observation = MarketObservation(
-            0,
-            window_index,
-            seed,
-            offers,
-            bids,
-            capacities,
-        )
-        structures.append(structure_from_observation(observation))
+            for name in ("alpha", "beta", "gamma")
+        }
+        jobs = []
+        for job_index in range(int(rng.integers(2, 6))):
+            n_legs = 2 if rng.random() < 0.25 else 1
+            largest = max(
+                1, min(p.total_nodes for p in platforms.values()) // (2 * n_legs)
+            )
+            legs = tuple(
+                Leg(
+                    str(leg_index),
+                    int(rng.integers(1, largest + 1)),
+                    int(rng.integers(1, 25)) * 300,
+                    frozenset({"gpu"}) if rng.random() < 0.2 else frozenset(),
+                )
+                for leg_index in range(n_legs)
+            )
+            factor = float(rng.lognormal(spec.lognormal_mean, spec.lognormal_sigma))
+            if rng.random() < 0.5:
+                bid: float | dict[str, float] = factor
+            else:
+                bid = {
+                    name: factor
+                    * float(rng.uniform(spec.preference_low, spec.preference_high))
+                    for name in platforms
+                }
+            jobs.append(Job(f"w{index:04d}-j{job_index:03d}", 0, legs, bid))
+        free = {name: platform.total_nodes for name, platform in platforms.items()}
+        window = build_window(0, index, jobs, platforms, free)
+        structures.append(structure_from_window(window))
     return structures
+
+
+__all__ = ["synthetic_structures"]

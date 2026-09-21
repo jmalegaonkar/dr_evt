@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Tests for deployed RegretFormer decisions and checkpoints."""
+"""Tests for the deployed RegretFormer mechanism."""
 
 from pathlib import Path
 import tempfile
@@ -18,106 +18,72 @@ try:
 except ModuleNotFoundError:
     torch = None
 
-from dr_evt_market import PlatformSnapshot, read_jobs, read_platforms
-from dr_evt_market.mechanisms import build_observation, validate_decisions
+from dr_evt_market import read_jobs, read_platforms
+from dr_evt_market.mechanisms import build_window, validate_decisions
 
-_DATA_DIR = Path(__file__).with_name("data")
+_DATA = Path(__file__).with_name("data")
 
 
-def _observation():
-    platforms = read_platforms(_DATA_DIR / "market_platforms.csv")
-    jobs, bids = read_jobs(_DATA_DIR / "market_jobs.csv", platforms)
-    snapshots = {
-        platform.system_id: PlatformSnapshot(
-            name=platform.system_id,
-            time_s=0,
-            total_nodes=platform.total_nodes,
-            free_nodes=platform.total_nodes,
-            in_use_nodes=0,
-            waiting_jobs=0,
-            current_utilization=0.0,
-        )
-        for platform in platforms
-    }
-    prices = {
-        platform.system_id: platform.price_per_node_hour
-        for platform in platforms
-    }
-    return build_observation(0, 0, 11, jobs, bids, snapshots, prices)
+def _window():
+    platforms = {p.name: p for p in read_platforms(_DATA / "market_platforms.csv")}
+    jobs = read_jobs(_DATA / "market_jobs.csv")
+    return build_window(
+        0, 0, jobs, platforms, {n: p.total_nodes for n, p in platforms.items()}
+    )
 
 
 @unittest.skipIf(torch is None, "torch is not installed")
 class RegretFormerTests(unittest.TestCase):
-    """Check feasibility, determinism, and checkpoint loading."""
+    """Feasibility, determinism and checkpoints."""
 
-    def test_random_network_emits_valid_individually_rational_decisions(self) -> None:
-        """Random deployment passes clearing without rejected decisions."""
-        observation = _observation()
-        decisions = RegretFormer(None, seed=7).decide(observation)
-
-        accepted, rejected = validate_decisions(observation, decisions)
-
+    def test_random_network_gives_valid_bounded_decisions(self) -> None:
+        """Deployment passes validation with charges within cost and value."""
+        window = _window()
+        decisions = RegretFormer(None, seed=7).decide(window)
+        accepted, rejected = validate_decisions(window, decisions)
         self.assertEqual(rejected, [])
         self.assertEqual(accepted, decisions)
         self.assertTrue(decisions)
         for decision in decisions:
-            cost = observation.candidate(
-                decision.job_id,
-                decision.placement_id,
-            ).resource_cost_credits
-            value = observation.value(
-                decision.job_id,
-                decision.placement_id,
+            self.assertGreaterEqual(
+                decision.charge_credits, decision.placement.cost_credits
             )
-            self.assertGreaterEqual(decision.charge_credits, cost)
-            self.assertLessEqual(decision.charge_credits, value or 0.0)
+            self.assertLessEqual(
+                decision.charge_credits, decision.placement.value_credits
+            )
 
-    def test_same_seed_produces_same_decisions(self) -> None:
-        """Two random networks with the same seed deploy identically."""
-        observation = _observation()
-
-        first = RegretFormer(None, seed=19).decide(observation)
-        second = RegretFormer(None, seed=19).decide(observation)
-
-        self.assertEqual(first, second)
-
-    def test_checkpoint_round_trip_preserves_decisions(self) -> None:
-        """Checkpoint metadata and weights reconstruct the same mechanism."""
-        observation = _observation()
-        original = RegretFormer(
-            None,
-            hid=16,
-            hid_att=8,
-            n_layers=1,
-            n_heads=2,
-            seed=23,
+    def test_same_seed_same_decisions(self) -> None:
+        """Two networks with one seed decide identically."""
+        window = _window()
+        self.assertEqual(
+            RegretFormer(None, seed=19).decide(window),
+            RegretFormer(None, seed=19).decide(window),
         )
+
+    def test_checkpoint_round_trip(self) -> None:
+        """A saved checkpoint restores the same mechanism."""
+        window = _window()
+        original = RegretFormer(None, hid=16, hid_att=8, n_layers=1, n_heads=2, seed=23)
         with tempfile.TemporaryDirectory(
             prefix="dr_evt_market_regretformer_"
         ) as directory:
-            checkpoint = Path(directory) / "model.pt"
+            path = Path(directory) / "model.pt"
             torch.save(
                 {
                     "state_dict": original.net.state_dict(),
                     "in_channels": original.in_channels,
-                    "hid": original.hid,
-                    "hid_att": original.hid_att,
-                    "n_layers": original.n_layers,
-                    "n_heads": original.n_heads,
-                    "trained_on": "fixture federation",
-                    "created": "2026-09-16",
+                    "hid": 16,
+                    "hid_att": 8,
+                    "n_layers": 1,
+                    "n_heads": 2,
+                    "trained_on": "fixture",
+                    "created": "2026-09-17",
                 },
-                checkpoint,
+                path,
             )
-
-            restored = RegretFormer(checkpoint, seed=99)
-
-        self.assertEqual(
-            restored.decide(observation),
-            original.decide(observation),
-        )
-        self.assertEqual(restored.trained_on, "fixture federation")
-        self.assertEqual(restored.created, "2026-09-16")
+            restored = RegretFormer(path, seed=99)
+        self.assertEqual(restored.decide(window), original.decide(window))
+        self.assertEqual(restored.trained_on, "fixture")
 
 
 if __name__ == "__main__":

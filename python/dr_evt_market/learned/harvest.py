@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Load learned-mechanism windows logged by market controller runs."""
+"""Load the windows a controller run logged with ``--log-windows``."""
 
 from __future__ import annotations
 
@@ -13,97 +13,72 @@ import csv
 import json
 from pathlib import Path
 
-from ..mechanisms.base import (
-    JobBid,
-    JobOffer,
-    LegBid,
-    LegSpec,
-    MarketObservation,
-    Placement,
-)
-from .windows import WindowStructure, structure_from_observation
+from ..mechanisms import Job, Leg, Platform, build_window
+from .windows import WindowStructure, structure_from_window
 
 
-def _observation(payload: dict) -> MarketObservation:
-    offers = []
-    bids = {}
-    for job in payload["jobs"]:
-        legs = tuple(
-            LegSpec(
+def _job(payload: dict) -> Job:
+    bid = payload["bid"]
+    return Job(
+        str(payload["job_id"]),
+        int(payload["submit_s"]),
+        tuple(
+            Leg(
                 str(leg["leg_id"]),
                 int(leg["num_nodes"]),
                 int(leg["limit_s"]),
+                frozenset(leg.get("requires", ())),
             )
-            for leg in job["legs"]
-        )
-        candidates = tuple(
-            Placement(
-                str(candidate["placement_id"]),
-                candidate["platform_by_leg"],
-                {
-                    name: int(nodes)
-                    for name, nodes in candidate["demand_by_platform"].items()
-                },
-                float(candidate["resource_cost_credits"]),
-            )
-            for candidate in job["candidates"]
-        )
-        job_id = str(job["job_id"])
-        offers.append(JobOffer(
-            job_id,
-            int(job["submit_s"]),
-            legs,
-            candidates,
-        ))
-        bids[job_id] = JobBid(
-            job_id,
-            tuple(
-                LegBid(
-                    str(leg["leg_id"]),
-                    {
-                        name: float(value)
-                        for name, value in leg["value_by_platform"].items()
-                    },
-                )
-                for leg in job["legs"]
-            ),
-        )
-    return MarketObservation(
-        int(payload["time_s"]),
-        int(payload["window_index"]),
-        int(payload["seed"]),
-        tuple(offers),
-        bids,
-        {
-            name: int(nodes)
-            for name, nodes in payload["free_nodes"].items()
-        },
-        tuple(str(job_id) for job_id in payload.get("truncated_jobs", ())),
+            for leg in payload["legs"]
+        ),
+        (
+            {str(k): float(v) for k, v in bid.items()}
+            if isinstance(bid, dict)
+            else float(bid)
+        ),
     )
 
 
 def harvest_structures(directory: str | Path) -> list[WindowStructure]:
-    """Read ``windows.csv`` and its logged JSON observations in index order."""
+    """Read ``windows.csv`` and the logged window files in index order."""
     root = Path(directory)
-    windows_path = root / "windows.csv"
     try:
-        with windows_path.open(newline="", encoding="utf-8") as input_file:
-            rows = list(csv.DictReader(input_file))
+        with (root / "windows.csv").open(newline="", encoding="utf-8") as input_file:
+            indexes = [int(row["index"]) for row in csv.DictReader(input_file)]
     except OSError as error:
-        raise ValueError(f"cannot read {windows_path}: {error}") from error
-    indexes = [int(row["index"]) for row in rows]
+        raise ValueError(f"cannot read {root / 'windows.csv'}: {error}") from error
     structures = []
     for index in indexes:
-        path = root / f"observation_{index:06d}.json"
+        path = root / f"window_{index:06d}.json"
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError(f"cannot read {path}: {error}") from error
-        if int(payload.get("window_index", -1)) != index:
-            raise ValueError(f"{path}: window index does not match windows.csv")
-        observation = _observation(payload)
-        if observation.jobs:
-            structures.append(structure_from_observation(observation))
+        if int(payload.get("index", -1)) != index:
+            raise ValueError(f"{path}: index does not match windows.csv")
+        platforms = {
+            name: Platform(
+                name,
+                int(spec["total_nodes"]),
+                float(spec["price_per_node_hour"]),
+                frozenset(spec.get("hardware", ())),
+            )
+            for name, spec in payload["platforms"].items()
+        }
+        jobs = [_job(item) for item in payload["jobs"]]
+        if not jobs:
+            continue
+        window = build_window(
+            int(payload["time_s"]),
+            index,
+            jobs,
+            platforms,
+            {name: int(nodes) for name, nodes in payload["free_nodes"].items()},
+        )
+        structures.append(structure_from_window(window))
     if not structures:
-        raise ValueError(f"{root}: no non-empty logged observations")
+        raise ValueError(f"{root}: no non-empty logged windows")
     return structures
+
+
+__all__ = ["harvest_structures"]

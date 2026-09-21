@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""End-to-end tests for market input, routing, and deterministic output."""
+"""End-to-end tests: input files, the loop, the outputs, both transports."""
 
 import csv
 import hashlib
@@ -25,132 +25,112 @@ from dr_evt_market import (
 )
 from dr_evt_market.mechanisms import Vcg
 
-_DATA_DIR = Path(__file__).with_name("data")
-_ROUTED_SHA256 = (
-    "1c1f53716b1fcf6e0cbca38f0c66884b6681f24e09ca4fec10f308c8f97ccf1d"
-)
+_DATA = Path(__file__).with_name("data")
+# Pinned on the fixture files as committed; regenerate only when they change.
+_ROUTED_SHA256 = "2328e1fe136e040566d52fde52f00b6115f73b3e7109476418bf363bfb41e6ba"
+
+
+class InputTests(unittest.TestCase):
+    """The two file formats."""
+
+    def test_platforms_carry_hardware(self) -> None:
+        """Hardware tags and the blank address are read."""
+        platforms = {p.name: p for p in read_platforms(_DATA / "market_platforms.csv")}
+        self.assertEqual(platforms["gamma"].hardware, frozenset({"cpu", "gpu"}))
+        self.assertIsNone(platforms["alpha"].address)
+
+    def test_jobs_single_and_per_platform_bids(self) -> None:
+        """A bid column gives one multiplier; bid:<platform> columns give a mapping."""
+        jobs = {job.job_id: job for job in read_jobs(_DATA / "market_jobs.csv")}
+        self.assertEqual(jobs["s03"].legs[0].requires, frozenset({"gpu"}))
+        self.assertEqual(jobs["c01"].bid, 3.0)
+        self.assertEqual([leg.leg_id for leg in jobs["c01"].legs], ["left", "right"])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "jobs.csv"
+            path.write_text(
+                "job_id,job_submit_time,num_nodes,time_limit,bid:alpha,bid:beta\n"
+                "a,0,4,60,1.5,\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(read_jobs(path)[0].bid, {"alpha": 1.5})
+            path.write_text("job_id,job_submit_time,num_nodes,time_limit\na,0,4,60\n")
+            with self.assertRaisesRegex(ValueError, "bid"):
+                read_jobs(path)
 
 
 class ControllerTests(unittest.TestCase):
-    """Exercise the complete market pipeline over both platform transports."""
+    """The fixture through the loop, in process and with one gRPC platform."""
 
     def setUp(self) -> None:
-        """Create an isolated output root and read the shared input files."""
-        self._temporary_directory = tempfile.TemporaryDirectory(
-            prefix="dr_evt_market_controller_"
-        )
-        self.addCleanup(self._temporary_directory.cleanup)
-        self.root = Path(self._temporary_directory.name)
-        self.specs = read_platforms(_DATA_DIR / "market_platforms.csv")
-        self.jobs, self.bids = read_jobs(
-            _DATA_DIR / "market_jobs.csv",
-            self.specs,
-        )
-        self.prices = {
-            spec.system_id: spec.price_per_node_hour
-            for spec in self.specs
+        """Read the fixture and make an output root."""
+        self._tmp = tempfile.TemporaryDirectory(prefix="dr_evt_market_controller_")
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.platforms = {
+            p.name: p for p in read_platforms(_DATA / "market_platforms.csv")
         }
+        self.jobs = read_jobs(_DATA / "market_jobs.csv")
 
-    def _inprocess_platforms(self, root: Path) -> dict:
+    def _sessions(self, root: Path, grpc_alpha=None) -> dict:
         return {
-            spec.system_id: InProcessPlatform(
-                spec.system_id,
-                spec.total_nodes,
-                root / spec.system_id,
+            name: (
+                GrpcPlatform(
+                    name, p.total_nodes, grpc_alpha[0], grpc_alpha[1], session_name=name
+                )
+                if grpc_alpha is not None and name == "alpha"
+                else InProcessPlatform(name, p.total_nodes, root / name)
             )
-            for spec in self.specs
+            for name, p in self.platforms.items()
         }
 
-    def _run(self, platforms: dict, output_dir: Path) -> tuple:
+    def _run(self, sessions: dict, out: Path):
         report = Controller(
-            platforms,
-            self.prices,
-            Vcg(),
-            self.jobs,
-            self.bids,
-            window_s=60,
-            seed=11,
+            sessions, self.platforms, Vcg(), self.jobs, window_s=60, seed=11
         ).run()
-        paths = write_outputs(report, output_dir)
-        return report, paths
+        return report, write_outputs(report, out)
 
-    def test_vcg_pipeline_writes_verified_outputs(self) -> None:
-        """The fixture routes immediately and writes pinned deterministic CSVs."""
-        report, paths = self._run(
-            self._inprocess_platforms(self.root / "platforms"),
-            self.root / "outputs",
-        )
-
+    def test_pipeline_routes_and_writes_pinned_outputs(self) -> None:
+        """Every leg starts at its window, charges are bounded, files are pinned."""
+        report, paths = self._run(self._sessions(self.root / "p"), self.root / "out")
         self.assertTrue(report.routed)
-        self.assertTrue(
-            any(len(window.queued) > len(window.placed) for window in report.windows)
-        )
-        for route in report.routed:
-            self.assertEqual(route.begin_s, route.window_time_s)
-            self.assertGreaterEqual(
-                route.charge_credits,
-                route.resource_cost_credits,
+        self.assertTrue(any(len(w.queued) > len(w.placed) for w in report.windows))
+        for leg in report.routed:
+            self.assertEqual(leg.begin_s, leg.window_time_s)
+            self.assertGreaterEqual(leg.charge_credits, leg.cost_credits - 1e-9)
+            self.assertLessEqual(leg.charge_credits, leg.value_credits + 1e-9)
+            self.assertAlmostEqual(
+                leg.premium_credits, leg.charge_credits - leg.cost_credits
             )
-            self.assertLessEqual(route.charge_credits, route.value_credits)
-
-        composite = [route for route in report.routed if route.job_id == "c01"]
+        composite = [leg for leg in report.routed if leg.job_id == "c01"]
         self.assertEqual(len(composite), 2)
+        self.assertEqual(len({leg.begin_s for leg in composite}), 1)
+        self.assertEqual(composite[1].platform, "gamma")  # the gpu leg
+        gpu_only = [leg for leg in report.routed if leg.job_id in ("s03", "s10")]
+        self.assertTrue(gpu_only and all(leg.platform == "gamma" for leg in gpu_only))
+        with Path(paths["rejected"]).open(newline="", encoding="utf-8") as f:
+            rejected = list(csv.DictReader(f))
         self.assertEqual(
-            {route.begin_s for route in composite},
-            {composite[0].window_time_s},
+            rejected, [{"job_id": "s12", "reason": "unaffordable", "time_s": "600"}]
         )
-
-        rejected_path = Path(paths["rejected"])
-        with rejected_path.open(newline="", encoding="utf-8") as input_file:
-            rejected = list(csv.DictReader(input_file))
-        self.assertIn(
-            {"job_id": "s12", "reason": "unaffordable", "time_s": "600"},
-            rejected,
-        )
-
-        routed_path = Path(paths["routed"])
-        digest = hashlib.sha256(routed_path.read_bytes()).hexdigest()
+        digest = hashlib.sha256(Path(paths["routed"]).read_bytes()).hexdigest()
         self.assertEqual(digest, _ROUTED_SHA256)
-        manifest = json.loads(
-            Path(paths["manifest"]).read_text(encoding="utf-8")
-        )
+        manifest = json.loads(Path(paths["manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["sha256"]["routed.csv"], digest)
-
-    def test_one_grpc_platform_matches_inprocess_output(self) -> None:
-        """Replacing one platform with gRPC leaves routed.csv byte-identical."""
-        _, local_paths = self._run(
-            self._inprocess_platforms(self.root / "local-platforms"),
-            self.root / "local-output",
+        self.assertEqual(
+            manifest["configuration"]["platforms"]["gamma"]["hardware"], ["cpu", "gpu"]
         )
 
-        server_dir = self.root / "grpc-server"
+    def test_one_grpc_platform_gives_identical_output(self) -> None:
+        """Serving alpha over gRPC leaves routed.csv byte-identical."""
+        _, local = self._run(
+            self._sessions(self.root / "local"), self.root / "local-out"
+        )
+        server_dir = self.root / "server"
         with ServerProcess(None, server_dir) as server:
-            mixed_platforms = {
-                spec.system_id: (
-                    GrpcPlatform(
-                        spec.system_id,
-                        spec.total_nodes,
-                        server.address,
-                        server_dir,
-                        session_name=spec.system_id,
-                    )
-                    if spec.system_id == "alpha"
-                    else InProcessPlatform(
-                        spec.system_id,
-                        spec.total_nodes,
-                        self.root / "mixed-platforms" / spec.system_id,
-                    )
-                )
-                for spec in self.specs
-            }
-            _, mixed_paths = self._run(
-                mixed_platforms,
-                self.root / "mixed-output",
-            )
-
+            sessions = self._sessions(self.root / "mixed", (server.address, server_dir))
+            _, mixed = self._run(sessions, self.root / "mixed-out")
         self.assertEqual(
-            Path(local_paths["routed"]).read_bytes(),
-            Path(mixed_paths["routed"]).read_bytes(),
+            Path(local["routed"]).read_bytes(), Path(mixed["routed"]).read_bytes()
         )
 
 

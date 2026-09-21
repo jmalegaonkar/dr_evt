@@ -5,329 +5,194 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Tests for exact and fallback VCG market clearing."""
+"""Tests for VCG: allocation, pivots, truthfulness, agreement with brute force."""
 
 import random
 import unittest
 
-from dr_evt_market import PlatformSnapshot
-from dr_evt_market.mechanisms import (
-    JobBid,
-    LegBid,
-    LegSpec,
-    MarketObservation,
-    QueuedJob,
-    Vcg,
-    build_observation,
-)
+from dr_evt_market.mechanisms import Job, Leg, Platform, Vcg, build_window, demand
 
 
-def _observation(
-    jobs: tuple[QueuedJob, ...],
-    bids: dict[str, JobBid],
-    capacities: dict[str, int],
-    prices: dict[str, float],
-) -> MarketObservation:
-    snapshots = {
-        name: PlatformSnapshot(
-            name=name,
-            time_s=0,
-            total_nodes=nodes,
-            free_nodes=nodes,
-            in_use_nodes=0,
-            waiting_jobs=0,
-            current_utilization=0.0,
-        )
-        for name, nodes in capacities.items()
-    }
-    return build_observation(0, 0, 17, jobs, bids, snapshots, prices)
+def _window(platforms: dict, jobs: list[Job]):
+    return build_window(
+        0, 0, jobs, platforms, {n: p.total_nodes for n, p in platforms.items()}
+    )
 
 
-def _random_observation() -> MarketObservation:
-    generator = random.Random(20260916)
-    platforms = ("alpha", "beta", "gamma")
-    prices = {"alpha": 1.0, "beta": 2.0, "gamma": 3.0}
-    capacities = {name: 1 for name in platforms}
-    jobs = []
-    bids = {}
-    for index in range(10):
-        job_id = f"job-{index}"
-        jobs.append(QueuedJob(job_id, 0, (LegSpec("0", 1, 3600),)))
-        bids[job_id] = JobBid.single(
-            job_id,
-            {
-                platform: prices[platform] + generator.uniform(1.0, 100.0)
-                for platform in platforms
-            },
-        )
-    return _observation(tuple(jobs), bids, capacities, prices)
+def _brute_force(window) -> tuple[float, dict]:
+    best = (-1.0, {})
 
-
-def _brute_force(obs: MarketObservation) -> dict[str, str]:
-    best_welfare = -1.0
-    best_placements: dict[str, str] = {}
-
-    def search(
-        job_index: int,
-        remaining: dict[str, int],
-        welfare: float,
-        placements: dict[str, str],
-    ) -> None:
-        nonlocal best_welfare, best_placements
-        if job_index == len(obs.jobs):
-            if welfare > best_welfare:
-                best_welfare = welfare
-                best_placements = dict(placements)
+    def search(index, remaining, welfare, chosen):
+        nonlocal best
+        if index == len(window.jobs):
+            if welfare > best[0] + 1e-12:
+                best = (welfare, dict(chosen))
             return
-
-        offer = obs.jobs[job_index]
-        search(job_index + 1, remaining, welfare, placements)
-        for candidate in offer.candidates:
-            if any(
-                nodes > remaining.get(platform, 0)
-                for platform, nodes in candidate.demand_by_platform.items()
+        job = window.jobs[index]
+        search(index + 1, remaining, welfare, chosen)
+        for placement in window.candidates[job.job_id]:
+            nodes = demand(job, placement)
+            if placement.net_credits < 0 or any(
+                c > remaining[n] for n, c in nodes.items()
             ):
                 continue
-            net_value = obs.net_value(offer.job_id, candidate.placement_id)
-            if net_value is None or net_value < 0.0:
-                continue
-            next_remaining = dict(remaining)
-            for platform, nodes in candidate.demand_by_platform.items():
-                next_remaining[platform] -= nodes
-            placements[offer.job_id] = candidate.placement_id
-            search(
-                job_index + 1,
-                next_remaining,
-                welfare + net_value,
-                placements,
-            )
-            del placements[offer.job_id]
+            after = dict(remaining)
+            for n, c in nodes.items():
+                after[n] -= c
+            chosen[job.job_id] = placement
+            search(index + 1, after, welfare + placement.net_credits, chosen)
+            del chosen[job.job_id]
 
-    search(0, dict(obs.free_nodes), 0.0, {})
-    return best_placements
+    search(0, dict(window.free_nodes), 0.0, {})
+    return best
 
 
-def _scaled_observation(
-    obs: MarketObservation,
-    job_id: str,
-    scale: float,
-    platform_only: str | None,
-) -> MarketObservation:
-    bids = dict(obs.bids)
-    scaled_legs = []
-    for leg in bids[job_id].legs:
-        values = {
-            platform: (
-                value * scale
-                if platform_only is None or platform == platform_only
-                else value
-            )
-            for platform, value in leg.value_by_platform.items()
-        }
-        scaled_legs.append(LegBid(leg.leg_id, values))
-    bids[job_id] = JobBid(job_id, tuple(scaled_legs))
-    return MarketObservation(
-        obs.time_s,
-        obs.window_index,
-        obs.seed,
-        obs.jobs,
-        bids,
-        obs.free_nodes,
-        obs.truncated_jobs,
-    )
+def _utility(window, decisions, job_id) -> float:
+    for decision in decisions:
+        if decision.job_id == job_id:
+            return decision.placement.value_credits - decision.charge_credits
+    return 0.0
 
 
-def _true_utility(
-    obs: MarketObservation,
-    decisions: list,
-    job_id: str,
-) -> float:
-    decision = next(
-        (item for item in decisions if item.job_id == job_id),
-        None,
-    )
-    if decision is None:
-        return 0.0
-    value = obs.value(job_id, decision.placement_id)
-    if value is None:
-        raise AssertionError("misreport selected an unacceptable placement")
-    return value - decision.charge_credits
+def _random_jobs(seed: int, count: int = 6) -> list[Job]:
+    rng = random.Random(seed)
+    jobs = []
+    for index in range(count):
+        legs = (
+            Leg(
+                "0",
+                rng.randint(5, 40),
+                rng.randint(600, 3600),
+                frozenset({"gpu"}) if rng.random() < 0.2 else frozenset(),
+            ),
+        )
+        if rng.random() < 0.3:
+            legs = legs + (Leg("1", rng.randint(5, 25), rng.randint(600, 3600)),)
+        bid = (
+            rng.uniform(1.2, 4.0)
+            if rng.random() < 0.5
+            else {n: rng.uniform(1.2, 4.0) for n in ("alpha", "beta", "gamma")}
+        )
+        jobs.append(Job(f"j{index}", 0, legs, bid))
+    return jobs
+
+
+PLATFORMS = {
+    "alpha": Platform("alpha", 100, 1.0, {"cpu"}),
+    "beta": Platform("beta", 60, 2.0, {"cpu"}),
+    "gamma": Platform("gamma", 40, 3.0, {"cpu", "gpu"}),
+}
 
 
 class VcgTests(unittest.TestCase):
-    """Check exact VCG allocation, payments, truthfulness, and fallback."""
+    """Small hand cases, then random windows against brute force."""
 
-    def test_contended_winner_pays_loser_externality(self) -> None:
-        """A sole winner pays resource cost plus the losing net value."""
-        jobs = tuple(
-            QueuedJob(job_id, 0, (LegSpec("0", 60, 60),))
-            for job_id in ("first", "second")
-        )
-        bids = {
-            "first": JobBid.single("first", {"alpha": 12.0}),
-            "second": JobBid.single("second", {"alpha": 9.0}),
+    def test_contended_winner_pays_the_displaced_net_value(self) -> None:
+        """Two jobs, one slot: the winner pays cost plus the loser's net value."""
+        platforms = {"alpha": Platform("alpha", 100, 2.0)}
+        first = Job("first", 0, (Leg("0", 60, 3600),), 1.5)  # cost 120, value 180
+        second = Job("second", 0, (Leg("0", 60, 3600),), 1.25)  # cost 120, value 150
+        decisions = Vcg().decide(_window(platforms, [first, second]))
+        self.assertEqual([d.job_id for d in decisions], ["first"])
+        self.assertAlmostEqual(decisions[0].charge_credits, 120.0 + 30.0)
+
+    def test_uncontended_jobs_pay_cost_only(self) -> None:
+        """Two jobs that both fit pay exactly their cost."""
+        platforms = {"alpha": Platform("alpha", 100, 2.0)}
+        jobs = [
+            Job("a", 0, (Leg("0", 40, 3600),), 1.5),
+            Job("b", 0, (Leg("0", 40, 3600),), 1.25),
+        ]
+        charges = {
+            d.job_id: d.charge_credits for d in Vcg().decide(_window(platforms, jobs))
         }
-        observation = _observation(
-            jobs,
-            bids,
-            {"alpha": 100},
-            {"alpha": 2.0},
-        )
+        self.assertEqual(charges, {"a": 80.0, "b": 80.0})
 
-        decisions = Vcg().decide(observation)
-
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].job_id, "first")
-        self.assertEqual(decisions[0].placement_id, "alpha")
-        self.assertAlmostEqual(decisions[0].charge_credits, 9.0)
-        self.assertAlmostEqual(decisions[0].score or 0.0, 10.0)
-
-    def test_uncontended_jobs_pay_resource_cost(self) -> None:
-        """Jobs that both fit impose no externality beyond resource cost."""
-        jobs = tuple(
-            QueuedJob(job_id, 0, (LegSpec("0", 40, 90),))
-            for job_id in ("first", "second")
-        )
-        bids = {
-            "first": JobBid.single("first", {"alpha": 12.0}),
-            "second": JobBid.single("second", {"alpha": 9.0}),
+    def test_composite_beats_two_singles(self) -> None:
+        """A composite with more net value takes both platforms."""
+        platforms = {
+            "alpha": Platform("alpha", 5, 1.0),
+            "beta": Platform("beta", 5, 1.0),
         }
-        observation = _observation(
-            jobs,
-            bids,
-            {"alpha": 100},
-            {"alpha": 2.0},
+        composite = Job(
+            "c", 0, (Leg("l", 5, 60), Leg("r", 5, 60)), {"alpha": 10.0, "beta": 8.0}
         )
-
-        decisions = Vcg().decide(observation)
-
+        singles = [
+            Job("a", 0, (Leg("0", 5, 60),), 8.0),
+            Job("b", 0, (Leg("0", 5, 60),), 9.0),
+        ]
+        decisions = Vcg().decide(_window(platforms, [composite, *singles]))
         self.assertEqual(
-            {item.job_id: item.charge_credits for item in decisions},
-            {"first": 2.0, "second": 2.0},
+            [(d.job_id, d.placement.id) for d in decisions], [("c", "alpha+beta")]
         )
 
-    def test_composite_beats_two_lower_value_single_jobs(self) -> None:
-        """A higher-value composite wins both platforms as one job."""
-        jobs = (
-            QueuedJob(
-                "composite",
-                0,
-                (LegSpec("left", 5, 60), LegSpec("right", 5, 60)),
-            ),
-            QueuedJob("alpha-job", 0, (LegSpec("0", 5, 60),)),
-            QueuedJob("beta-job", 0, (LegSpec("0", 5, 60),)),
-        )
-        bids = {
-            "composite": JobBid(
-                "composite",
-                (
-                    LegBid("left", {"alpha": 10.0}),
-                    LegBid("right", {"beta": 8.0}),
-                ),
-            ),
-            "alpha-job": JobBid.single("alpha-job", {"alpha": 8.0}),
-            "beta-job": JobBid.single("beta-job", {"beta": 9.0}),
-        }
-        observation = _observation(
-            jobs,
-            bids,
-            {"alpha": 5, "beta": 5},
-            {"alpha": 0.0, "beta": 0.0},
-        )
+    def test_random_windows_match_brute_force_and_are_ir(self) -> None:
+        """Allocation equals exhaustive search; charges stay within bounds."""
+        for seed in range(1, 13):
+            window = _window(PLATFORMS, _random_jobs(seed))
+            decisions = Vcg().decide(window)
+            welfare, chosen = _brute_force(window)
+            with self.subTest(seed=seed):
+                self.assertAlmostEqual(
+                    sum(d.placement.net_credits for d in decisions), welfare
+                )
+                for decision in decisions:
+                    self.assertGreaterEqual(
+                        decision.charge_credits, decision.placement.cost_credits - 1e-9
+                    )
+                    self.assertLessEqual(
+                        decision.charge_credits, decision.placement.value_credits + 1e-9
+                    )
 
-        decisions = Vcg().decide(observation)
-
-        self.assertEqual(
-            [(item.job_id, item.placement_id) for item in decisions],
-            [("composite", "alpha+beta")],
-        )
-
-    def test_exact_allocation_matches_brute_force(self) -> None:
-        """A seeded ten-job window matches exhaustive allocation."""
-        observation = _random_observation()
-
-        decisions = Vcg().decide(observation)
-        selected = {
-            decision.job_id: decision.placement_id
-            for decision in decisions
-        }
-
-        self.assertEqual(selected, _brute_force(observation))
-        for decision in decisions:
-            cost = observation.candidate(
-                decision.job_id,
-                decision.placement_id,
-            ).resource_cost_credits
-            value = observation.value(
-                decision.job_id,
-                decision.placement_id,
-            )
-            self.assertIsNotNone(value)
-            self.assertGreaterEqual(decision.charge_credits, cost)
-            self.assertLessEqual(decision.charge_credits, value or 0.0)
-
-    def test_seeded_window_has_no_profitable_misreport(self) -> None:
-        """Whole-vector and per-platform scaling cannot improve true utility."""
-        observation = _random_observation()
+    def test_no_profitable_misreport(self) -> None:
+        """Scaling any multiplier never raises a job's true utility."""
+        jobs = _random_jobs(7)
+        window = _window(PLATFORMS, jobs)
         mechanism = Vcg()
-        truthful = mechanism.decide(observation)
-        scales = (0.5, 0.8, 1.2, 2.0)
-
-        for offer in observation.jobs:
-            truthful_utility = _true_utility(
-                observation,
-                truthful,
-                offer.job_id,
-            )
-            variants = (None, *sorted(observation.free_nodes))
-            for scale in scales:
-                for platform in variants:
-                    with self.subTest(
-                        job=offer.job_id,
-                        scale=scale,
-                        platform=platform,
-                    ):
-                        changed = _scaled_observation(
-                            observation,
-                            offer.job_id,
-                            scale,
-                            platform,
+        truthful = mechanism.decide(window)
+        for job in jobs:
+            true_utility = _utility(window, truthful, job.job_id)
+            for scale in (0.5, 0.8, 1.2, 2.0):
+                if isinstance(job.bid, dict):
+                    variants = [
+                        {
+                            n: v * (scale if n == only or only is None else 1.0)
+                            for n, v in job.bid.items()
+                        }
+                        for only in (None, *job.bid)
+                    ]
+                else:
+                    variants = [job.bid * scale]
+                for bid in variants:
+                    lied = [
+                        (
+                            Job(j.job_id, j.submit_s, j.legs, bid)
+                            if j.job_id == job.job_id
+                            else j
                         )
-                        utility = _true_utility(
-                            observation,
-                            mechanism.decide(changed),
-                            offer.job_id,
-                        )
-                        self.assertGreaterEqual(
-                            truthful_utility + 1.0e-9,
-                            utility,
-                        )
-
-    def test_large_window_uses_greedy_critical_payment(self) -> None:
-        """More than 800 variables use density and bisection payments."""
-        jobs = tuple(
-            QueuedJob(f"job-{index:04d}", 0, (LegSpec("0", 1, 1),))
-            for index in range(801)
-        )
-        bids = {
-            job.job_id: JobBid.single(
-                job.job_id,
-                {"alpha": float(1_000 - index)},
-            )
-            for index, job in enumerate(jobs)
-        }
-        observation = _observation(
-            jobs,
-            bids,
-            {"alpha": 1},
-            {"alpha": 0.0},
-        )
-
-        decisions = Vcg().decide(observation)
-
-        self.assertEqual(len(decisions), 1)
-        self.assertEqual(decisions[0].job_id, "job-0000")
-        self.assertAlmostEqual(decisions[0].charge_credits, 999.0, places=6)
+                        for j in jobs
+                    ]
+                    lied_window = _window(PLATFORMS, lied)
+                    # utility at true values, looked up in the truthful window
+                    decisions = mechanism.decide(lied_window)
+                    utility = 0.0
+                    for decision in decisions:
+                        if decision.job_id == job.job_id:
+                            true_value = (
+                                next(
+                                    p.value_credits
+                                    for p in window.candidates[job.job_id]
+                                    if p.id == decision.placement.id
+                                )
+                                if any(
+                                    p.id == decision.placement.id
+                                    for p in window.candidates[job.job_id]
+                                )
+                                else 0.0
+                            )
+                            utility = true_value - decision.charge_credits
+                    with self.subTest(job=job.job_id, scale=scale, bid=bid):
+                        self.assertLessEqual(utility, true_utility + 1e-9)
 
 
 if __name__ == "__main__":

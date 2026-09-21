@@ -39,10 +39,18 @@ CTest discovers tests enabled by the current build configuration. Optional
 features such as Protobuf, gRPC, MPI, Python bindings, and Catch2 add their
 corresponding tests only when available.
 
-The market package has 42 adapter, VCG, controller, learned-mechanism, and parity
-tests; run them
+The market package has 47 adapter, market model, VCG, controller and learned tests; run them
 with
 `./tests/run_market_tests.sh` after installing the `grpc` package extra.
+
+CI intentionally does not install torch. The learned-window, RegretFormer,
+regret, and training tests report a skip reason there. To run all 47 market
+tests locally, install the learned extra before invoking the same runner:
+
+```bash
+python3 -m pip install -e "python[grpc,mechanisms,learned]"
+./tests/run_market_tests.sh
+```
 
 ## Expected outputs
 

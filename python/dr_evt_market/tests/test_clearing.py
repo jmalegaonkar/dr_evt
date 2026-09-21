@@ -5,241 +5,142 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Tests for building and submitting market clearing windows."""
+"""Tests for placements, windows and submission to live platforms."""
 
 from pathlib import Path
 import tempfile
 import unittest
 
-from dr_evt_market import InProcessPlatform, PlatformSnapshot
+from dr_evt_market import InProcessPlatform
 from dr_evt_market.mechanisms import (
     Decision,
-    JobBid,
-    LegBid,
-    LegSpec,
-    QueuedJob,
-    build_observation,
-    submit_decisions,
+    Job,
+    Leg,
+    Platform,
+    base_cost,
+    build_window,
+    placements,
+    submit,
     validate_decisions,
 )
 
-
-def _snapshot(name: str, total_nodes: int, free_nodes: int) -> PlatformSnapshot:
-    return PlatformSnapshot(
-        name=name,
-        time_s=60,
-        total_nodes=total_nodes,
-        free_nodes=free_nodes,
-        in_use_nodes=total_nodes - free_nodes,
-        waiting_jobs=0,
-        current_utilization=(total_nodes - free_nodes) / total_nodes,
-    )
+PLATFORMS = {
+    "alpha": Platform("alpha", 100, 1.0, {"cpu"}),
+    "beta": Platform("beta", 60, 2.0, {"cpu"}),
+    "gamma": Platform("gamma", 40, 3.0, {"cpu", "gpu"}),
+}
+FULL = {name: platform.total_nodes for name, platform in PLATFORMS.items()}
 
 
-class ClearingTests(unittest.TestCase):
-    """Exercise deterministic placement construction and live submission."""
+class PlacementTests(unittest.TestCase):
+    """Feasibility, cost and value of placements."""
 
-    def test_builds_feasible_candidates_and_costs(self) -> None:
-        """One-leg and composite placements match hand-computed values."""
-        queue = (
-            QueuedJob("single", 0, (LegSpec("0", 20, 3600),)),
-            QueuedJob(
-                "composite",
-                0,
-                (
-                    LegSpec("cpu", 10, 3600),
-                    LegSpec("gpu", 20, 1800),
-                ),
-            ),
-        )
-        bids = {
-            "single": JobBid.single(
-                "single",
-                {"alpha": 100.0, "beta": 100.0},
-            ),
-            "composite": JobBid(
-                "composite",
-                (
-                    LegBid("cpu", {"alpha": 30.0, "beta": 40.0}),
-                    LegBid("gpu", {"alpha": 50.0, "beta": 60.0}),
-                ),
-            ),
+    def test_single_bid_values_the_base_cost_everywhere(self) -> None:
+        """Value is the multiplier times the cheapest usable cost."""
+        job = Job("s", 0, (Leg("0", 20, 3600),), 1.5)
+        self.assertAlmostEqual(base_cost(job, PLATFORMS), 20.0)
+        found = {
+            p.id: (p.cost_credits, p.value_credits)
+            for p in placements(job, PLATFORMS, FULL)
         }
-        snapshots = {
-            "beta": _snapshot("beta", 60, 15),
-            "alpha": _snapshot("alpha", 100, 50),
-        }
+        self.assertEqual(found, {"alpha": (20.0, 30.0)})  # beta costs 40, gamma 60
 
-        observation = build_observation(
-            60,
-            2,
-            9,
-            queue,
-            bids,
-            snapshots,
-            {"alpha": 2.0, "beta": 4.0},
-        )
+    def test_hardware_and_per_platform_bids_restrict_placements(self) -> None:
+        """A gpu leg goes only to gamma; a mapped bid only where it names."""
+        gpu = Job("g", 0, (Leg("0", 10, 3600, {"gpu"}),), 2.0)
+        self.assertEqual([p.id for p in placements(gpu, PLATFORMS, FULL)], ["gamma"])
+        mapped = Job("m", 0, (Leg("0", 10, 3600),), {"beta": 1.5, "gamma": 1.1})
+        found = {p.id: p.value_credits for p in placements(mapped, PLATFORMS, FULL)}
+        self.assertEqual(found, {"beta": 30.0, "gamma": 33.0})
 
-        single = observation.job("single")
+    def test_composite_legs_share_capacity(self) -> None:
+        """Legs on one platform must fit together; costs add up."""
+        job = Job("c", 0, (Leg("a", 30, 3600), Leg("b", 30, 3600)), 2.0)
+        found = {p.id: p for p in placements(job, PLATFORMS, FULL)}
+        self.assertIn("alpha+alpha", found)
+        self.assertIn(
+            "beta+beta", found
+        )  # 60 nodes fit beta; cost 120 equals value 120
+        self.assertNotIn("gamma+gamma", found)  # 60 nodes do not fit gamma's 40
         self.assertEqual(
-            [candidate.placement_id for candidate in single.candidates],
-            ["alpha"],
-        )
-        self.assertEqual(
-            dict(single.candidates[0].demand_by_platform),
-            {"alpha": 20},
-        )
-        self.assertEqual(single.candidates[0].resource_cost_credits, 40.0)
-
-        composite = observation.job("composite")
-        self.assertEqual(
-            [candidate.placement_id for candidate in composite.candidates],
-            ["alpha+alpha", "beta+alpha"],
-        )
-        self.assertEqual(
-            dict(composite.candidates[0].demand_by_platform),
-            {"alpha": 30},
-        )
-        self.assertEqual(
-            dict(composite.candidates[1].demand_by_platform),
-            {"alpha": 20, "beta": 10},
-        )
-        self.assertEqual(
-            [item.resource_cost_credits for item in composite.candidates],
-            [40.0, 60.0],
+            (found["alpha+alpha"].cost_credits, found["alpha+alpha"].value_credits),
+            (60.0, 120.0),
         )
 
-    def test_candidate_limit_records_truncated_jobs(self) -> None:
-        """Candidate truncation is deterministic and keeps blocked jobs."""
-        snapshots = {
-            name: _snapshot(name, 10, 10)
-            for name in ("gamma", "alpha", "beta")
-        }
-        wide = QueuedJob(
-            "wide",
-            0,
-            (LegSpec("first", 1, 1), LegSpec("second", 1, 1)),
+    def test_free_nodes_narrow_the_window(self) -> None:
+        """A window only offers placements that fit in the free nodes now."""
+        job = Job("s", 0, (Leg("0", 50, 3600),), 3.0)
+        window = build_window(
+            0, 0, [job], PLATFORMS, {"alpha": 40, "beta": 60, "gamma": 40}
         )
-        blocked = QueuedJob("blocked", 0, (LegSpec("0", 11, 1),))
-        bids = {
-            "wide": JobBid(
-                "wide",
-                (
-                    LegBid("first", {name: 1.0 for name in snapshots}),
-                    LegBid("second", {name: 1.0 for name in snapshots}),
-                ),
-            ),
-            "blocked": JobBid.single(
-                "blocked",
-                {name: 1.0 for name in snapshots},
-            ),
-        }
+        self.assertEqual([p.id for p in window.candidates["s"]], ["beta"])
 
-        observation = build_observation(
-            60,
-            1,
-            3,
-            (wide, blocked),
-            bids,
-            snapshots,
-            {name: 1.0 for name in snapshots},
-            max_candidates=2,
-        )
 
-        self.assertEqual(
-            [
-                candidate.placement_id
-                for candidate in observation.job("wide").candidates
-            ],
-            ["alpha+alpha", "alpha+beta"],
-        )
-        self.assertEqual(observation.truncated_jobs, ("wide",))
-        self.assertEqual(observation.job("blocked").candidates, ())
+class SubmissionTests(unittest.TestCase):
+    """One window through live platforms, every leg starting at the window."""
 
     def test_live_submission_starts_every_leg_at_window_time(self) -> None:
-        """Two live platforms start every feasible submitted leg immediately."""
-        with tempfile.TemporaryDirectory(
-            prefix="dr_evt_market_clearing_"
-        ) as directory:
+        """Winners handed to their platforms begin at once."""
+        with tempfile.TemporaryDirectory(prefix="dr_evt_market_clearing_") as directory:
             root = Path(directory)
-            platforms = {
-                "alpha": InProcessPlatform("alpha", 100, root / "alpha"),
-                "beta": InProcessPlatform("beta", 50, root / "beta"),
+            sessions = {
+                name: InProcessPlatform(name, platform.total_nodes, root / name)
+                for name, platform in PLATFORMS.items()
             }
-            for platform in platforms.values():
-                platform.advance_to(60)
-            snapshots = {
-                name: platform.snapshot()
-                for name, platform in platforms.items()
-            }
-            queue = (
-                QueuedJob("single", 5, (LegSpec("0", 60, 30),)),
-                QueuedJob(
+            for session in sessions.values():
+                session.advance_to(60)
+            jobs = [
+                Job("single", 5, (Leg("0", 60, 30),), 3.0),
+                Job(
                     "composite",
                     30,
-                    (
-                        LegSpec("left", 20, 40),
-                        LegSpec("right", 30, 50),
-                    ),
+                    (Leg("left", 20, 40), Leg("right", 30, 50, {"gpu"})),
+                    3.0,
                 ),
-            )
-            bids = {
-                "single": JobBid.single(
-                    "single",
-                    {"alpha": 100.0, "beta": 80.0},
-                ),
-                "composite": JobBid(
-                    "composite",
-                    (
-                        LegBid("left", {"alpha": 60.0, "beta": 70.0}),
-                        LegBid("right", {"alpha": 80.0, "beta": 90.0}),
-                    ),
-                ),
-            }
-            observation = build_observation(
-                60,
-                1,
-                5,
-                queue,
-                bids,
-                snapshots,
-                {"alpha": 1.0, "beta": 2.0},
-            )
-            decisions = [
-                Decision("single", "alpha", 100.0),
-                Decision("composite", "beta+alpha", 150.0),
             ]
-            accepted, rejected = validate_decisions(observation, decisions)
+            free = {
+                name: session.snapshot().free_nodes
+                for name, session in sessions.items()
+            }
+            window = build_window(60, 1, jobs, PLATFORMS, free)
+            decisions = [
+                Decision(
+                    "single",
+                    single := next(
+                        p for p in window.candidates["single"] if p.id == "alpha"
+                    ),
+                    single.cost_credits,
+                ),
+                Decision(
+                    "composite",
+                    pair := next(
+                        p
+                        for p in window.candidates["composite"]
+                        if p.id == "beta+gamma"
+                    ),
+                    pair.cost_credits,
+                ),
+            ]
+            accepted, rejected = validate_decisions(window, decisions)
             self.assertEqual(rejected, [])
-
-            handles = submit_decisions(
-                accepted,
-                observation,
-                platforms,
-                60,
-            )
+            handles = submit(accepted, window, sessions, 60)
             self.assertEqual(
                 list(handles),
-                [
-                    ("single", "0"),
-                    ("composite", "left"),
-                    ("composite", "right"),
-                ],
+                [("single", "0"), ("composite", "left"), ("composite", "right")],
             )
-            for platform in platforms.values():
-                platform.advance_to(60)
-
-            routed_platforms = {
+            for session in sessions.values():
+                session.advance_to(60)
+            where = {
                 ("single", "0"): "alpha",
                 ("composite", "left"): "beta",
-                ("composite", "right"): "alpha",
+                ("composite", "right"): "gamma",
             }
             for key, handle in handles.items():
-                timing = platforms[routed_platforms[key]].timings([handle])[0]
-                self.assertEqual(timing.begin_s, 60.0)
-
-            for platform in platforms.values():
-                platform.finish()
+                self.assertEqual(
+                    sessions[where[key]].timings([handle])[0].begin_s, 60.0
+                )
+            for session in sessions.values():
+                session.finish()
 
 
 if __name__ == "__main__":

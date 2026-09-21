@@ -1,4 +1,4 @@
-system_id,total_nodes,price_per_node_hour,address
-alpha,100,1.0,
-beta,60,2.0,
-gamma,40,3.0,
+system_id,total_nodes,price_per_node_hour,hardware,address
+alpha,100,1.0,cpu,
+beta,60,2.0,cpu,
+gamma,40,3.0,cpu gpu,

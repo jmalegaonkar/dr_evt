@@ -14,6 +14,7 @@ dependencies = []
 [project.optional-dependencies]
 grpc = ["grpcio", "grpcio-tools", "protobuf"]
 mechanisms = ["numpy", "scipy"]
+learned = ["torch", "numpy"]
 
 [tool.setuptools]
 package-dir = {"" = "."}
