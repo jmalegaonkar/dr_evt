@@ -6,3 +6,15 @@
 ################################################################################
 
 """A federation market over DR_EVT: four platforms, a job stream, an auction."""
+
+from .platform import Dane, Lassen, Platform, Tioga, Tuolumne, PLATFORMS, federation
+
+__all__ = [
+    "Dane",
+    "Lassen",
+    "Platform",
+    "Tioga",
+    "Tuolumne",
+    "PLATFORMS",
+    "federation",
+]

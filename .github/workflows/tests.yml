@@ -81,7 +81,7 @@ jobs:
           python -m venv venv
           source venv/bin/activate
           python -m pip install --upgrade pip
-          python -m pip install grpcio grpcio-tools protobuf
+          python -m pip install grpcio grpcio-tools protobuf numpy scipy
 
       - name: Configure CMake
         env:
@@ -266,6 +266,15 @@ jobs:
           echo "========================================"
           PYTHON_EXECUTABLE=$(command -v python) ./tests/run_python_tests.sh
 
+      - name: Run Market Package Tests
+        id: market-package
+        run: |
+          source venv/bin/activate
+          echo "========================================"
+          echo "Running Market Package Tests (5 tests)"
+          echo "========================================"
+          PYTHON_EXECUTABLE=$(command -v python) ./tests/run_market_tests.sh
+
       - name: Run gRPC Client/Server Tests
         id: grpc
         run: |
@@ -342,6 +351,7 @@ jobs:
           echo "  Config (12 tests): ${{ steps.config.outcome }}"
           echo "  CTest (15 native + trace tools + MPI when available): ${{ steps.core-ctest.outcome }}"
           echo "  Python API (18 tests): ${{ steps.python-api.outcome }}"
+          echo "  Market Package (5 tests): ${{ steps.market-package.outcome }}"
           echo "  Append-Job (20 C++ + 5 optional gRPC checks): ${{ steps.append-job.outcome }}"
           echo "  Backfill-window focused rerun (5 checks already counted): ${{ steps.backfill-window.outcome }}"
           echo "  Single-Coordinator gRPC: ${{ steps.grpc-single-coordinator.outcome }}"
