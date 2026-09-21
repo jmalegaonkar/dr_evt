@@ -75,3 +75,6 @@ venv_docs/
 # Market notebook scratch space
 python/dr_evt_market/learn/output/
 *.egg-info/
+
+# Local job traces, never committed
+python/dr_evt_market/lc_traces/

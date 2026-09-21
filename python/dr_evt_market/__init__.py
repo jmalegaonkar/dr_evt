@@ -7,14 +7,31 @@
 
 """A federation market over DR_EVT: four platforms, a job stream, an auction."""
 
-from .platform import Dane, Lassen, Platform, Tioga, Tuolumne, PLATFORMS, federation
+from .jobs import Job, prepare, read_jobs, write_jobs
+from .platform import (
+    Corona,
+    Dane,
+    DEFAULT_FEDERATION,
+    Lassen,
+    Platform,
+    PLATFORMS,
+    Tioga,
+    Tuolumne,
+    federation,
+)
 
 __all__ = [
+    "Corona",
     "Dane",
+    "DEFAULT_FEDERATION",
+    "Job",
     "Lassen",
     "Platform",
     "Tioga",
     "Tuolumne",
     "PLATFORMS",
     "federation",
+    "prepare",
+    "read_jobs",
+    "write_jobs",
 ]

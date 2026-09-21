@@ -12,7 +12,16 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from dr_evt_market import Dane, Lassen, PLATFORMS, Tioga, Tuolumne, federation
+from dr_evt_market import (
+    Corona,
+    Dane,
+    DEFAULT_FEDERATION,
+    Lassen,
+    PLATFORMS,
+    Tioga,
+    Tuolumne,
+    federation,
+)
 
 
 def _job(num_nodes: int, limit_s: int, *requires: str) -> SimpleNamespace:
@@ -78,26 +87,33 @@ class PlatformTests(unittest.TestCase):
         """Fit checks tags and exposed nodes, while cost uses the profile price."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            dane = Dane(root / "dane", share=0.1)
+            corona = Corona(root / "corona", share=0.1)
             lassen = Lassen(root / "lassen", share=0.1)
-            gpu_job = _job(10, 360, "gpu")
+            nvidia_job = _job(10, 360, "nvidia")
 
-            self.assertFalse(dane.fits(gpu_job))
-            self.assertTrue(lassen.fits(gpu_job))
+            self.assertFalse(corona.fits(nvidia_job))
+            self.assertTrue(lassen.fits(nvidia_job))
             self.assertFalse(lassen.fits(_job(lassen.exposed_nodes + 1, 1)))
-            self.assertEqual(lassen.cost(gpu_job), 3.0)
+            self.assertEqual(lassen.cost(nvidia_job), 3.0)
 
     def test_federation_preserves_profile_order(self) -> None:
         """The federation contains one instance of each named profile in order."""
         with tempfile.TemporaryDirectory() as directory:
             platforms = federation(directory, share=0.05)
-            self.assertEqual(
-                list(platforms), [profile.name for profile in PLATFORMS]
-            )
+            self.assertEqual(tuple(platforms), DEFAULT_FEDERATION)
             self.assertEqual(
                 [type(platform) for platform in platforms.values()],
-                [Dane, Lassen, Tioga, Tuolumne],
+                [Corona, Lassen, Tioga, Tuolumne],
             )
+            selected = federation(
+                directory, share=0.05, names=("dane", "corona")
+            )
+            self.assertEqual(list(selected), ["dane", "corona"])
+            self.assertEqual(
+                [type(value) for value in selected.values()], [Dane, Corona]
+            )
+            with self.assertRaises(ValueError):
+                federation(directory, names=("unknown",))
 
 
 if __name__ == "__main__":

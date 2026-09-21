@@ -7,10 +7,8 @@
 
 """One real machine exposing a share of itself as a DR_EVT simulation."""
 
-from collections.abc import Iterable
 from numbers import Real
 from pathlib import Path
-from typing import Any
 
 
 _STATISTIC_FIELDS = (
@@ -23,7 +21,6 @@ _STATISTIC_FIELDS = (
 
 class Platform:
     """One real machine, exposing a share of itself as a dr_evt simulation."""
-
     name: str
     total_nodes: int
     price_per_node_hour: float
@@ -35,7 +32,6 @@ class Platform:
             raise ValueError("share must be a number in (0, 1]")
 
         import dr_evt
-
         self.share = float(share)
         self.exposed_nodes = max(1, round(self.total_nodes * self.share))
         self._work_dir = Path(work_dir).resolve()
@@ -58,11 +54,11 @@ class Platform:
         self._dr_evt = dr_evt
         self._last_time_s = 0
 
-    def fits(self, job: Any) -> bool:
+    def fits(self, job) -> bool:
         """Return whether a job's hardware and node demand fit this platform."""
         return job.requires <= self.hardware and job.num_nodes <= self.exposed_nodes
 
-    def cost(self, job: Any) -> float:
+    def cost(self, job) -> float:
         """Return the platform cost of running a job for its time limit."""
         return self.price_per_node_hour * job.num_nodes * job.limit_s / 3600
 
@@ -83,7 +79,7 @@ class Platform:
         """Return the number of jobs waiting for scheduler placement."""
         return int(self._simulation.get_active_job_count())
 
-    def submit(self, jobs: Iterable[Any], time_s: int) -> list[int]:
+    def submit(self, jobs, time_s: int) -> list[int]:
         """Submit jobs at one time in their given order and return their IDs."""
         requests = [
             self._dr_evt.JobAppendRequest(time_s, job.num_nodes, "1", job.limit_s)
@@ -99,9 +95,16 @@ class Platform:
         return {field: float(getattr(statistics, field)) for field in _STATISTIC_FIELDS}
 
 
+class Corona(Platform):
+    """The Corona AMD GPU platform profile."""
+    name = "corona"
+    total_nodes = 121
+    price_per_node_hour = 2.0
+    hardware = frozenset({"cpu", "gpu", "amd"})
+
+
 class Dane(Platform):
     """The Dane CPU platform profile."""
-
     name = "dane"
     total_nodes = 1544
     price_per_node_hour = 1.0
@@ -110,7 +113,6 @@ class Dane(Platform):
 
 class Lassen(Platform):
     """The Lassen NVIDIA GPU platform profile."""
-
     name = "lassen"
     total_nodes = 795
     price_per_node_hour = 3.0
@@ -119,7 +121,6 @@ class Lassen(Platform):
 
 class Tioga(Platform):
     """The Tioga AMD GPU platform profile."""
-
     name = "tioga"
     total_nodes = 32
     price_per_node_hour = 6.0
@@ -128,17 +129,21 @@ class Tioga(Platform):
 
 class Tuolumne(Platform):
     """The Tuolumne AMD GPU platform profile."""
-
     name = "tuolumne"
     total_nodes = 1152
     price_per_node_hour = 8.0
     hardware = frozenset({"cpu", "gpu", "amd"})
 
 
-PLATFORMS = (Dane, Lassen, Tioga, Tuolumne)
+PLATFORMS = (Corona, Dane, Lassen, Tioga, Tuolumne)
+DEFAULT_FEDERATION = ("corona", "lassen", "tioga", "tuolumne")
+_PROFILES = {profile.name: profile for profile in PLATFORMS}
 
 
-def federation(work_dir: str | Path, share: float = 1.0) -> dict[str, Platform]:
-    """Build the four named platforms in their canonical order."""
+def federation(work_dir, share=1.0, names=DEFAULT_FEDERATION) -> dict[str, Platform]:
+    """Build the selected named platforms in the requested order."""
     root = Path(work_dir)
-    return {profile.name: profile(root / profile.name, share) for profile in PLATFORMS}
+    try:
+        return {name: _PROFILES[name](root / name, share) for name in names}
+    except KeyError as error:
+        raise ValueError(f"unknown platform {error.args[0]!r}") from None
