@@ -71,3 +71,7 @@ VERIFICATION_COMPLETE.md
 docs/_build/
 docs/doxygen/
 venv_docs/
+
+# Market notebook scratch space
+learn/output/
+*.egg-info/
