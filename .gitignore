@@ -73,5 +73,5 @@ docs/doxygen/
 venv_docs/
 
 # Market notebook scratch space
-learn/output/
+python/dr_evt_market/learn/output/
 *.egg-info/
