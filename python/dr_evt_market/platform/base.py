@@ -10,17 +10,26 @@
 from numbers import Real
 from pathlib import Path
 
-
 _STATISTIC_FIELDS = (
-    "avg_turnaround_time", "avg_wait_time", "current_time", "jobs_completed",
-    "jobs_running", "jobs_submitted", "jobs_waiting", "makespan",
-    "nodes_available", "nodes_in_use", "resource_area", "total_nodes",
+    "avg_turnaround_time",
+    "avg_wait_time",
+    "current_time",
+    "jobs_completed",
+    "jobs_running",
+    "jobs_submitted",
+    "jobs_waiting",
+    "makespan",
+    "nodes_available",
+    "nodes_in_use",
+    "resource_area",
+    "total_nodes",
     "utilization",
 )
 
 
 class Platform:
     """One real machine, exposing a share of itself as a dr_evt simulation."""
+
     name: str
     total_nodes: int
     price_per_node_hour: float
@@ -32,6 +41,7 @@ class Platform:
             raise ValueError("share must be a number in (0, 1]")
 
         import dr_evt
+
         self.share = float(share)
         self.exposed_nodes = max(1, round(self.total_nodes * self.share))
         self._work_dir = Path(work_dir).resolve()
@@ -93,57 +103,3 @@ class Platform:
         """Return all simulation statistics as an ordered mapping of floats."""
         statistics = self._simulation.get_statistics()
         return {field: float(getattr(statistics, field)) for field in _STATISTIC_FIELDS}
-
-
-class Corona(Platform):
-    """The Corona AMD GPU platform profile."""
-    name = "corona"
-    total_nodes = 121
-    price_per_node_hour = 2.0
-    hardware = frozenset({"cpu", "gpu", "amd"})
-
-
-class Dane(Platform):
-    """The Dane CPU platform profile."""
-    name = "dane"
-    total_nodes = 1544
-    price_per_node_hour = 1.0
-    hardware = frozenset({"cpu"})
-
-
-class Lassen(Platform):
-    """The Lassen NVIDIA GPU platform profile."""
-    name = "lassen"
-    total_nodes = 795
-    price_per_node_hour = 3.0
-    hardware = frozenset({"cpu", "gpu", "nvidia"})
-
-
-class Tioga(Platform):
-    """The Tioga AMD GPU platform profile."""
-    name = "tioga"
-    total_nodes = 32
-    price_per_node_hour = 6.0
-    hardware = frozenset({"cpu", "gpu", "amd"})
-
-
-class Tuolumne(Platform):
-    """The Tuolumne AMD GPU platform profile."""
-    name = "tuolumne"
-    total_nodes = 1152
-    price_per_node_hour = 8.0
-    hardware = frozenset({"cpu", "gpu", "amd"})
-
-
-PLATFORMS = (Corona, Dane, Lassen, Tioga, Tuolumne)
-DEFAULT_FEDERATION = ("corona", "lassen", "tioga", "tuolumne")
-_PROFILES = {profile.name: profile for profile in PLATFORMS}
-
-
-def federation(work_dir, share=1.0, names=DEFAULT_FEDERATION) -> dict[str, Platform]:
-    """Build the selected named platforms in the requested order."""
-    root = Path(work_dir)
-    try:
-        return {name: _PROFILES[name](root / name, share) for name in names}
-    except KeyError as error:
-        raise ValueError(f"unknown platform {error.args[0]!r}") from None

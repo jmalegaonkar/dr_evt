@@ -28,7 +28,6 @@ class Mechanism(ABC):
     @abstractmethod
     def decide(self, jobs, platforms, free_nodes) -> list[Decision]:
         """Return the winning decisions in batch order."""
-        raise NotImplementedError
 
 
 def base_cost(job, platforms) -> float | None:
@@ -55,6 +54,6 @@ def candidates(job, platforms, free_nodes) -> dict[str, tuple[float, float]]:
         value = (
             multiplier * cost if isinstance(job.bid, dict) else multiplier * cheapest
         )
-        if value >= cost:
+        if value + 1.0e-9 >= cost:
             offers[name] = (cost, value)
     return offers
