@@ -13,7 +13,6 @@ from pathlib import Path
 
 from dr_evt_market import Job, prepare, read_jobs, write_jobs
 
-
 _DATA = Path(__file__).with_name("data")
 
 
@@ -49,11 +48,19 @@ class JobTests(unittest.TestCase):
         jobs, summary, rows = prepare(
             {"tioga": _DATA / "trace.csv"}, start=1000, hours=0.05, seed=3
         )
-        self.assertEqual(summary, {
-            "read": 12, "kept": 5, "no_nodes": 1, "no_limit": 1,
-            "no_start": 2, "bad_runtime": 1, "outside_interval": 2,
-            "kept:tioga": 5,
-        })
+        self.assertEqual(
+            summary,
+            {
+                "read": 12,
+                "kept": 5,
+                "no_nodes": 1,
+                "no_limit": 1,
+                "no_start": 2,
+                "bad_runtime": 1,
+                "outside_interval": 2,
+                "kept:tioga": 5,
+            },
+        )
         self.assertEqual([job.submit_s for job in jobs], [0, 35, 85, 115, 174])
         self.assertEqual(jobs[0].limit_s, 120)
         self.assertEqual(rows[0]["source"], "tioga")
@@ -91,13 +98,10 @@ class JobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             trace = Path(directory) / "simple.csv"
             trace.write_text(
-                "job_submit_time,num_nodes,time_limit,user\n"
-                "100,2,60,fixed-user\n",
+                "job_submit_time,num_nodes,time_limit,user\n" "100,2,60,fixed-user\n",
                 encoding="utf-8",
             )
-            jobs, _, rows = prepare(
-                {"tioga": trace}, trace_format="simple", seed=8
-            )
+            jobs, _, rows = prepare({"tioga": trace}, trace_format="simple", seed=8)
         self.assertEqual(rows[0]["persona"], "value")
         self.assertEqual(jobs[0].bid, 4.6178)
 
@@ -111,17 +115,69 @@ class JobTests(unittest.TestCase):
                 "10.8,1,4.2,2.7\n",
                 encoding="utf-8",
             )
-            jobs, summary, _ = prepare(
-                {"simple": trace}, trace_format="simple"
-            )
+            jobs, summary, _ = prepare({"simple": trace}, trace_format="simple")
         self.assertEqual([job.submit_s for job in jobs], [0, 2])
         self.assertEqual([job.limit_s for job in jobs], [4, 5])
         self.assertEqual([job.runtime_s for job in jobs], [2, 3])
         self.assertEqual(summary["kept:simple"], 2)
-        self.assertEqual(sum(summary[key] for key in (
-            "no_nodes", "no_limit", "no_start", "bad_runtime",
-            "outside_interval",
-        )), 0)
+        self.assertEqual(
+            sum(
+                summary[key]
+                for key in (
+                    "no_nodes",
+                    "no_limit",
+                    "no_start",
+                    "bad_runtime",
+                    "outside_interval",
+                )
+            ),
+            0,
+        )
+
+    def test_per_platform_fixture_bids_and_precedence(self) -> None:
+        """Mapped bids select exact platforms and override a scalar bid."""
+        jobs = read_jobs(_DATA / "jobs.csv")
+        self.assertIsInstance(jobs[0].bid, float)
+        self.assertEqual(jobs[0].multiplier("anything"), 1.4)
+        self.assertEqual(jobs[3].bid, {"lassen": 2.0, "tuolumne": 1.5})
+        self.assertIsNone(jobs[3].multiplier("corona"))
+        self.assertEqual(jobs[9].multiplier("corona"), 10.0)
+        self.assertEqual(jobs[14].bid, {"corona": 0.5})
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "both.csv"
+            path.write_text(
+                "job_id,job_submit_time,num_nodes,time_limit,bid,bid:corona\n"
+                "mixed,0,1,1,9.0,2.5\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(read_jobs(path)[0].bid, {"corona": 2.5})
+
+    def test_prepare_per_platform_bids_round_trip(self) -> None:
+        """Prepared mapped bids are deterministic and retain dynamic columns."""
+        traces = {"tioga": _DATA / "trace.csv"}
+        jobs, _, rows = prepare(
+            traces,
+            start=1000,
+            hours=0.05,
+            seed=4,
+            per_platform=("corona", "lassen"),
+        )
+        again, _, _ = prepare(
+            traces,
+            start=1000,
+            hours=0.05,
+            seed=4,
+            per_platform=("corona", "lassen"),
+        )
+        self.assertTrue(all(list(job.bid) == ["corona", "lassen"] for job in jobs))
+        self.assertEqual(jobs, again)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mapped.csv"
+            write_jobs(rows, path)
+            header = path.read_text(encoding="utf-8").splitlines()[0]
+            self.assertIn("bid,bid:corona,bid:lassen,requires", header)
+            self.assertEqual(read_jobs(path), jobs)
 
 
 if __name__ == "__main__":
