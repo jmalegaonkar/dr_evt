@@ -8,6 +8,7 @@
 """Tests for the market loop, its outputs and the command line."""
 
 import collections
+import json
 import os
 import subprocess
 import sys
@@ -17,6 +18,7 @@ from pathlib import Path
 
 from dr_evt_market import (
     Decision,
+    FirstPrice,
     MarketError,
     Mechanism,
     Vcg,
@@ -120,6 +122,21 @@ class MarketTests(unittest.TestCase):
                 with self.assertRaises(MarketError):
                     run(jobs, platforms, _BadMechanism(mode))
 
+    def test_first_price_revenue_is_routed_value(self) -> None:
+        """Pay what you bid gives the routed surplus to the center."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jobs = read_jobs(_DATA / "jobs.csv")
+            platforms = federation(root / "platforms", share=0.1)
+            result = run(jobs, platforms, FirstPrice())
+            paths = write_outputs(result, root / "out")
+            summary = json.loads(Path(paths["summary"]).read_text(encoding="utf-8"))
+        self.assertEqual(len(result.routed), 18)
+        self.assertEqual(result.configuration["mechanism"], "firstprice")
+        self.assertAlmostEqual(
+            summary["revenue"], sum(row.value for row in result.routed)
+        )
+
     def test_command_line_runs_and_prepares(self) -> None:
         """The command line runs the fixture and prepares two trace sources."""
         environment = os.environ.copy()
@@ -156,6 +173,27 @@ class MarketTests(unittest.TestCase):
                 "3cca4e4cce7106a213753c9fff762c62a354b9e680b66195fef59465f51c4ae9",
                 completed.stdout.splitlines(),
             )
+            first_price = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "dr_evt_market",
+                    "run",
+                    "--jobs",
+                    str(_DATA / "jobs.csv"),
+                    "--out",
+                    str(root / "first-price"),
+                    "--share",
+                    "0.1",
+                    "--mechanism",
+                    "firstprice",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertIn("routed=18", first_price.stdout.splitlines())
 
             prepared_path = root / "prepared.csv"
             prepared = subprocess.run(

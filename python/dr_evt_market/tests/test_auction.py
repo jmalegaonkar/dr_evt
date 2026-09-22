@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from dataclasses import dataclass, replace
 
-from dr_evt_market import Decision, Job, Vcg, candidates, federation
+from dr_evt_market import Decision, FirstPrice, Job, Vcg, candidates, federation
 
 _TIE_BREAK = 1.0e-9
 
@@ -217,6 +217,37 @@ class AuctionTests(unittest.TestCase):
         self.assertEqual(len(decisions), 1)
         self.assertEqual(decisions[0].job_id, job.job_id)
         self.assertAlmostEqual(decisions[0].charge, platform.cost(job))
+
+    def test_first_price_is_feasible_and_bounded_by_vcg(self) -> None:
+        """Greedy winners fit, pay their values, and cannot beat VCG welfare."""
+        first_price = FirstPrice()
+        for case, (jobs, platforms, free) in enumerate(_instances()):
+            with self.subTest(case=case):
+                offers = [candidates(job, platforms, free) for job in jobs]
+                job_indexes = {job.job_id: index for index, job in enumerate(jobs)}
+                decisions = first_price.decide(jobs, platforms, free)
+                indexes = [job_indexes[decision.job_id] for decision in decisions]
+                self.assertEqual(indexes, sorted(indexes))
+                self.assertEqual(len(indexes), len(set(indexes)))
+
+                used = {name: 0 for name in platforms}
+                welfare = 0.0
+                for decision in decisions:
+                    index = job_indexes[decision.job_id]
+                    job = jobs[index]
+                    cost, value = offers[index][decision.platform]
+                    used[decision.platform] += job.num_nodes
+                    welfare += value - cost
+                    self.assertAlmostEqual(decision.charge, value)
+                self.assertTrue(all(used[name] <= free[name] for name in platforms))
+
+                vcg = Vcg().decide(jobs, platforms, free)
+                vcg_welfare = sum(
+                    offers[job_indexes[item.job_id]][item.platform][1]
+                    - offers[job_indexes[item.job_id]][item.platform][0]
+                    for item in vcg
+                )
+                self.assertLessEqual(welfare, vcg_welfare + 1.0e-9)
 
 
 if __name__ == "__main__":

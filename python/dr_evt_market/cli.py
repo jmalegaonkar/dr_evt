@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .jobs import prepare, read_jobs, write_jobs
 from .market import run, write_outputs
-from .mechanism import Vcg
+from .mechanism import MECHANISMS
 from .platform import DEFAULT_FEDERATION, PLATFORMS, federation
 
 _PROFILES = {profile.name: profile for profile in PLATFORMS}
@@ -29,6 +29,7 @@ def _parser():
     run_parser.add_argument("--share", type=float, default=1.0)
     run_parser.add_argument("--prefix", type=int, default=32)
     run_parser.add_argument("--window", type=int, default=60)
+    run_parser.add_argument("--mechanism", choices=MECHANISMS, default="vcg")
     run_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
 
     prepare_parser = commands.add_parser("prepare", help="prepare trace jobs")
@@ -61,7 +62,7 @@ def _run(args):
     result = run(
         read_jobs(args.jobs),
         platforms,
-        Vcg(),
+        MECHANISMS[args.mechanism](),
         window_s=args.window,
         prefix=args.prefix,
     )

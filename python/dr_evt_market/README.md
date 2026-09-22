@@ -62,6 +62,10 @@ bid on, and have a posted price no greater than the bid. `Vcg` maximizes total r
 value minus platform cost subject to one platform per job and node capacity. Its
 Clarke pivot is the second price generalized to several platforms with capacity.
 
+VCG lets users keep the savings between their values and the charges above posted
+cost. Pay what you bid assigns offers greedily and gives that surplus to the center.
+Both mechanisms report welfare and revenue through the same market outputs.
+
 At each fixed window, the market advances every platform, admits arrivals, auctions
 the first `prefix` queued jobs, submits winners, and advances again. Its guarantee is
 that every accepted winner starts in its market window. Per-job begin and end are

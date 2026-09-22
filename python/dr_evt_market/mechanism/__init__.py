@@ -8,6 +8,16 @@
 """Mechanisms: the interface, the candidates a job can take, and the auctions."""
 
 from .base import Decision, Mechanism, candidates
+from .firstprice import FirstPrice
 from .vcg import Vcg
 
-__all__ = ["Decision", "Mechanism", "Vcg", "candidates"]
+MECHANISMS = {"vcg": Vcg, "firstprice": FirstPrice}
+
+__all__ = [
+    "Decision",
+    "FirstPrice",
+    "MECHANISMS",
+    "Mechanism",
+    "Vcg",
+    "candidates",
+]
