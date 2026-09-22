@@ -29,17 +29,23 @@ def _drop_reason(row):
 def prepare(
     traces,
     *,
+    home_prices,
     trace_format="lc",
     start=None,
     hours=None,
     seed=0,
     requires="gpu",
     per_platform=None,
+    limit_from="runtime",
 ) -> tuple[list[Job], dict[str, int]]:
     """Prepare deterministic jobs from one interval across named traces."""
     readers = {"lc": read_lc, "simple": read_simple}
     if trace_format not in readers:
         raise ValueError("trace_format must be 'lc' or 'simple'")
+    if any(source not in home_prices for source in traces):
+        raise ValueError("every trace source must have a home price")
+    if limit_from not in {"runtime", "request"}:
+        raise ValueError("limit_from must be 'runtime' or 'request'")
     reader = readers[trace_format]
     records = []
     for source, path in traces.items():
@@ -78,16 +84,29 @@ def prepare(
     for index, record in enumerate(kept, start=1):
         job_id = f"j{index:06d}"
         user = record.user if record.user is not None else job_id
-        persona, bid = persona_bid(seed, record.source, user, job_id, per_platform)
+        persona, bid = persona_bid(
+            seed,
+            record.source,
+            user,
+            job_id,
+            home_prices[record.source],
+            per_platform,
+        )
+        limit = (
+            record.runtime
+            if limit_from == "runtime" and record.runtime is not None
+            else record.limit
+        )
         jobs.append(
             Job(
                 job_id,
                 record.submit - origin,
                 record.nodes,
-                record.limit,
+                limit,
                 bid,
                 requirement_set,
                 record.runtime,
+                record.limit,
                 record.source,
                 user,
                 persona,

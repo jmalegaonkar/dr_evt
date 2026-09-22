@@ -50,7 +50,10 @@ def _solve(jobs, platforms, free_nodes, time_limit_s, excluded=None):
     from scipy.optimize import Bounds, LinearConstraint, milp
 
     objective = np.asarray(
-        [-variable.net + _TIE_BREAK * variable.index for variable in variables]
+        [
+            -variable.net + _TIE_BREAK * variable.index - _TIE_BREAK
+            for variable in variables
+        ]
     )
     rows = []
     upper = []

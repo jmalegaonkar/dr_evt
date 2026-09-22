@@ -8,7 +8,8 @@
 """A federation market over DR_EVT: four platforms, a job stream, an auction."""
 
 from .jobs import Job, prepare, read_jobs, write_jobs
-from .mechanism import Decision, Mechanism, Vcg, base_cost, candidates
+from .market import MarketError, Rejected, Result, RoutedJob, run, write_outputs
+from .mechanism import Decision, Mechanism, Vcg, candidates
 from .platform import (
     Corona,
     Dane,
@@ -28,16 +29,21 @@ __all__ = [
     "Decision",
     "Job",
     "Lassen",
+    "MarketError",
     "Mechanism",
     "Platform",
+    "Rejected",
+    "Result",
+    "RoutedJob",
     "Tioga",
     "Tuolumne",
     "Vcg",
     "PLATFORMS",
-    "base_cost",
     "candidates",
     "federation",
     "prepare",
     "read_jobs",
+    "run",
+    "write_outputs",
     "write_jobs",
 ]

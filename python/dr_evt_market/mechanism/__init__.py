@@ -7,7 +7,7 @@
 
 """Mechanisms: the interface, the candidates a job can take, and the auctions."""
 
-from .base import Decision, Mechanism, base_cost, candidates
+from .base import Decision, Mechanism, candidates
 from .vcg import Vcg
 
-__all__ = ["Decision", "Mechanism", "Vcg", "base_cost", "candidates"]
+__all__ = ["Decision", "Mechanism", "Vcg", "candidates"]

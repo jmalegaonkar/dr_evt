@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""The mechanism interface: decisions, the abstract mechanism, base cost, candidates."""
+"""The mechanism interface: decisions, the abstract mechanism, and candidates."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -30,30 +30,19 @@ class Mechanism(ABC):
         """Return the winning decisions in batch order."""
 
 
-def base_cost(job, platforms) -> float | None:
-    """Return the cheapest cost among platforms that can fit a job."""
-    costs = (
-        platform.cost(job) for platform in platforms.values() if platform.fits(job)
-    )
-    return min(costs, default=None)
-
-
 def candidates(job, platforms, free_nodes) -> dict[str, tuple[float, float]]:
     """Return feasible platform offers as cost and value pairs."""
-    cheapest = base_cost(job, platforms)
     offers = {}
     for name, platform in platforms.items():
-        multiplier = job.multiplier(name)
+        price = job.price(name)
         if (
             not platform.fits(job)
-            or multiplier is None
+            or price is None
             or free_nodes[name] < job.num_nodes
+            or price + 1.0e-9 < platform.price_per_node_hour
         ):
             continue
         cost = platform.cost(job)
-        value = (
-            multiplier * cost if isinstance(job.bid, dict) else multiplier * cheapest
-        )
-        if value + 1.0e-9 >= cost:
-            offers[name] = (cost, value)
+        value = price * job.num_nodes * job.limit_s / 3600
+        offers[name] = (cost, value)
     return offers

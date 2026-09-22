@@ -49,7 +49,11 @@ class JobTests(unittest.TestCase):
     def test_prepare_lc_interval_and_summary(self) -> None:
         """LC preparation filters one interval and counts each drop reason."""
         jobs, summary = prepare(
-            {"tioga": _DATA / "trace.csv"}, start=1000, hours=0.05, seed=3
+            {"tioga": _DATA / "trace.csv"},
+            home_prices={"tioga": 6.0},
+            start=1000,
+            hours=0.05,
+            seed=3,
         )
         self.assertEqual(
             summary,
@@ -65,14 +69,21 @@ class JobTests(unittest.TestCase):
             },
         )
         self.assertEqual([job.submit_s for job in jobs], [0, 35, 85, 115, 174])
-        self.assertEqual(jobs[0].limit_s, 120)
+        self.assertEqual(jobs[0].limit_s, 40)
+        self.assertEqual(jobs[0].requested_s, 120)
         self.assertEqual(jobs[0].source, "tioga")
         self.assertTrue(all(job.requires == {"gpu"} for job in jobs))
 
     def test_sources_merge_on_one_origin(self) -> None:
         """Sources share one clock and contribute to persona identity."""
         traces = {"beta": _DATA / "trace.csv", "alpha": _DATA / "trace.csv"}
-        jobs, summary = prepare(traces, start=1000, hours=0.05, seed=0)
+        jobs, summary = prepare(
+            traces,
+            home_prices={"alpha": 2.0, "beta": 3.0},
+            start=1000,
+            hours=0.05,
+            seed=0,
+        )
         self.assertEqual(summary["kept:alpha"], 5)
         self.assertEqual(summary["kept:beta"], 5)
         self.assertEqual([job.submit_s for job in jobs[:2]], [0, 0])
@@ -83,9 +94,10 @@ class JobTests(unittest.TestCase):
     def test_prepare_is_deterministic_and_round_trips(self) -> None:
         """A seed fixes output bytes, and written rows read back as jobs."""
         traces = {"tioga": _DATA / "trace.csv"}
-        jobs, _ = prepare(traces, start=1000, hours=0.05, seed=4)
-        same_jobs, _ = prepare(traces, start=1000, hours=0.05, seed=4)
-        other_jobs, _ = prepare(traces, start=1000, hours=0.05, seed=5)
+        options = {"home_prices": {"tioga": 6.0}, "start": 1000, "hours": 0.05}
+        jobs, _ = prepare(traces, seed=4, **options)
+        same_jobs, _ = prepare(traces, seed=4, **options)
+        other_jobs, _ = prepare(traces, seed=5, **options)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             first, second, other = root / "a.csv", root / "b.csv", root / "c.csv"
@@ -96,17 +108,22 @@ class JobTests(unittest.TestCase):
             self.assertNotEqual(first.read_bytes(), other.read_bytes())
             self.assertEqual(read_jobs(first), jobs)
 
-    def test_persona_and_multiplier_are_hash_seeded(self) -> None:
-        """A fixed seed, source, user and job ID give a pinned multiplier."""
+    def test_persona_and_price_are_hash_seeded(self) -> None:
+        """A fixed seed, source, user and job ID give a pinned price."""
         with tempfile.TemporaryDirectory() as directory:
             trace = Path(directory) / "simple.csv"
             trace.write_text(
                 "job_submit_time,num_nodes,time_limit,user\n" "100,2,60,fixed-user\n",
                 encoding="utf-8",
             )
-            jobs, _ = prepare({"tioga": trace}, trace_format="simple", seed=8)
+            jobs, _ = prepare(
+                {"tioga": trace},
+                home_prices={"tioga": 6.0},
+                trace_format="simple",
+                seed=8,
+            )
         self.assertEqual(jobs[0].persona, "value")
-        self.assertEqual(jobs[0].bid, 4.6178)
+        self.assertEqual(jobs[0].bid, 27.7068)
 
     def test_simple_times_are_floored_sorted_and_shifted(self) -> None:
         """Simple fractional times use the earliest floored submit as zero."""
@@ -118,10 +135,15 @@ class JobTests(unittest.TestCase):
                 "10.8,1,4.2,2.7\n",
                 encoding="utf-8",
             )
-            jobs, summary = prepare({"simple": trace}, trace_format="simple")
+            jobs, summary = prepare(
+                {"simple": trace},
+                home_prices={"simple": 2.0},
+                trace_format="simple",
+            )
         self.assertEqual([job.submit_s for job in jobs], [0, 2])
-        self.assertEqual([job.limit_s for job in jobs], [4, 5])
+        self.assertEqual([job.limit_s for job in jobs], [2, 3])
         self.assertEqual([job.runtime_s for job in jobs], [2, 3])
+        self.assertEqual([job.requested_s for job in jobs], [4, 5])
         self.assertEqual(summary["kept:simple"], 2)
         self.assertEqual(
             sum(
@@ -141,11 +163,11 @@ class JobTests(unittest.TestCase):
         """Mapped bids select exact platforms and override a scalar bid."""
         jobs = read_jobs(_DATA / "jobs.csv")
         self.assertIsInstance(jobs[0].bid, float)
-        self.assertEqual(jobs[0].multiplier("anything"), 1.4)
-        self.assertEqual(jobs[3].bid, {"lassen": 2.0, "tuolumne": 1.5})
-        self.assertIsNone(jobs[3].multiplier("corona"))
-        self.assertEqual(jobs[9].multiplier("corona"), 10.0)
-        self.assertEqual(jobs[14].bid, {"corona": 0.5})
+        self.assertEqual(jobs[0].price("anything"), 2.2)
+        self.assertEqual(jobs[3].bid, {"lassen": 3.2, "tuolumne": 8.5})
+        self.assertIsNone(jobs[3].price("corona"))
+        self.assertEqual(jobs[9].price("corona"), 20.0)
+        self.assertEqual(jobs[14].bid, {"corona": 1.5})
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "both.csv"
@@ -161,6 +183,7 @@ class JobTests(unittest.TestCase):
         traces = {"tioga": _DATA / "trace.csv"}
         jobs, _ = prepare(
             traces,
+            home_prices={"tioga": 6.0},
             start=1000,
             hours=0.05,
             seed=4,
@@ -168,12 +191,14 @@ class JobTests(unittest.TestCase):
         )
         again, _ = prepare(
             traces,
+            home_prices={"tioga": 6.0},
             start=1000,
             hours=0.05,
             seed=4,
             per_platform=("corona", "lassen"),
         )
         self.assertTrue(all(list(job.bid) == ["corona", "lassen"] for job in jobs))
+        self.assertEqual(jobs[0].bid, {"corona": 10.8524, "lassen": 11.1589})
         self.assertEqual(jobs, again)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "mapped.csv"
@@ -181,6 +206,21 @@ class JobTests(unittest.TestCase):
             header = path.read_text(encoding="utf-8").splitlines()[0]
             self.assertIn("bid,bid:corona,bid:lassen,requires", header)
             self.assertEqual(read_jobs(path), jobs)
+
+    def test_limit_can_follow_runtime_or_request(self) -> None:
+        """Preparation carries the request and selects either limit source."""
+        traces = {"tioga": _DATA / "trace.csv"}
+        options = {
+            "home_prices": {"tioga": 6.0},
+            "start": 1000,
+            "hours": 0.05,
+        }
+        runtime_jobs, _ = prepare(traces, **options)
+        request_jobs, _ = prepare(traces, limit_from="request", **options)
+        self.assertEqual(runtime_jobs[0].limit_s, 40)
+        self.assertEqual(request_jobs[0].limit_s, 120)
+        self.assertEqual(runtime_jobs[0].requested_s, request_jobs[0].requested_s)
+        self.assertEqual(runtime_jobs[0].requested_s, 120)
 
 
 if __name__ == "__main__":

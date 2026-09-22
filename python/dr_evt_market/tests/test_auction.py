@@ -13,21 +13,23 @@ import tempfile
 import unittest
 from dataclasses import dataclass, replace
 
-from dr_evt_market import Decision, Job, Vcg, base_cost, candidates, federation
+from dr_evt_market import Decision, Job, Vcg, candidates, federation
+
+_TIE_BREAK = 1.0e-9
 
 
 @dataclass(frozen=True)
 class _Platform:
     name: str
     exposed_nodes: int
-    price: float
+    price_per_node_hour: float
     hardware: frozenset[str]
 
     def fits(self, job) -> bool:
         return job.requires <= self.hardware and job.num_nodes <= self.exposed_nodes
 
     def cost(self, job) -> float:
-        return self.price * job.num_nodes * job.limit_s / 3600
+        return self.price_per_node_hour * job.num_nodes * job.limit_s / 3600
 
 
 def _instances(count=30):
@@ -47,13 +49,13 @@ def _instances(count=30):
         for index in range(rng.randint(1, 5)):
             if index % 2:
                 bid = {
-                    name: rng.uniform(0.5, 4.5)
+                    name: rng.uniform(1.0, 4.0)
                     for name in platforms
                     if rng.random() < 0.75
                 }
-                bid = bid or {"a": rng.uniform(0.5, 4.5)}
+                bid = bid or {"a": rng.uniform(1.0, 4.0)}
             else:
-                bid = rng.uniform(0.5, 4.5)
+                bid = rng.uniform(1.0, 4.0)
             requires = frozenset({"gpu"}) if (case + index) % 3 == 0 else frozenset()
             nodes = rng.randint(1, 3)
             limit_s = rng.randint(1, 5) * 60
@@ -102,9 +104,10 @@ def _brute(jobs, platforms, free_nodes, excluded=None):
         )
         penalty = (
             sum(indexes[i, name] for i, name in enumerate(choice) if name is not None)
-            * 1.0e-9
+            * _TIE_BREAK
         )
-        score = welfare - penalty
+        bonus = sum(name is not None for name in choice) * _TIE_BREAK
+        score = welfare - penalty + bonus
         if score > best_score:
             best_score, best_choice, best_welfare = score, choice, welfare
     chosen = {i: name for i, name in enumerate(best_choice) if name is not None}
@@ -112,13 +115,7 @@ def _brute(jobs, platforms, free_nodes, excluded=None):
 
 
 def _value(job, platform, platforms):
-    multiplier = job.multiplier(platform)
-    cost = platforms[platform].cost(job)
-    return (
-        multiplier * cost
-        if isinstance(job.bid, dict)
-        else multiplier * base_cost(job, platforms)
-    )
+    return job.price(platform) * job.num_nodes * job.limit_s / 3600
 
 
 class AuctionTests(unittest.TestCase):
@@ -131,17 +128,17 @@ class AuctionTests(unittest.TestCase):
             free = {
                 name: platform.exposed_nodes for name, platform in platforms.items()
             }
-            scalar = Job("scalar", 0, 4, 360, 2.0, {"gpu"})
+            scalar = Job("scalar", 0, 4, 360, 3.0, {"gpu"})
             offers = candidates(scalar, platforms, free)
-            self.assertAlmostEqual(base_cost(scalar, platforms), 0.8)
             self.assertEqual(list(offers), ["corona", "lassen"])
-            self.assertEqual(offers["corona"], (0.8, 1.6))
+            self.assertEqual(offers["corona"], (0.8, 1.2))
+            self.assertEqual(offers["lassen"], (1.2, 1.2))
             mapped = Job(
                 "mapped",
                 0,
                 2,
                 360,
-                {"lassen": 0.9, "tioga": 2.0, "tuolumne": 1.5},
+                {"lassen": 2.5, "tioga": 6.5, "tuolumne": 8.5},
                 {"gpu"},
             )
             self.assertEqual(

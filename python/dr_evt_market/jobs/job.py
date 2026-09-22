@@ -19,6 +19,7 @@ _JOB_FIELDS = (
     "bid",
     "requires",
     "runtime",
+    "requested",
     "source",
     "user",
     "persona",
@@ -36,6 +37,7 @@ class Job:
     bid: float | dict[str, float]
     requires: frozenset[str] = frozenset()
     runtime_s: int | None = None
+    requested_s: int | None = None
     source: str = ""
     user: str = ""
     persona: str = ""
@@ -43,11 +45,9 @@ class Job:
     def __post_init__(self) -> None:
         """Freeze the hardware requirements."""
         object.__setattr__(self, "requires", frozenset(self.requires))
-        if isinstance(self.bid, dict):
-            object.__setattr__(self, "bid", dict(sorted(self.bid.items())))
 
-    def multiplier(self, platform: str) -> float | None:
-        """Return the multiplier offered on a platform, if any."""
+    def price(self, platform: str) -> float | None:
+        """Return the price offered on a platform, if any."""
         return self.bid.get(platform) if isinstance(self.bid, dict) else self.bid
 
 
@@ -60,6 +60,7 @@ def read_jobs(path: str | Path) -> list[Job]:
         bid_fields = [name for name in fields if name.startswith("bid:")]
         for row in reader:
             runtime = row.get("runtime")
+            requested = row.get("requested")
             platform_bid = {
                 name[4:]: float(row[name]) for name in bid_fields if row[name] != ""
             }
@@ -71,6 +72,7 @@ def read_jobs(path: str | Path) -> list[Job]:
                 platform_bid or float(row["bid"]),
                 frozenset((row.get("requires") or "").split()),
                 None if runtime in (None, "") else int(runtime),
+                None if requested in (None, "") else int(requested),
                 row.get("source") or "",
                 row.get("user") or "",
                 row.get("persona") or "",
@@ -101,6 +103,7 @@ def write_jobs(jobs: list[Job], path: str | Path) -> None:
                 "bid": "" if isinstance(job.bid, dict) else job.bid,
                 "requires": " ".join(sorted(job.requires)),
                 "runtime": "" if job.runtime_s is None else job.runtime_s,
+                "requested": "" if job.requested_s is None else job.requested_s,
                 "source": job.source,
                 "user": job.user,
                 "persona": job.persona,
