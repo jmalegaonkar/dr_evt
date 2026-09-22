@@ -8,6 +8,9 @@
 """Tests for the market loop, its outputs and the command line."""
 
 import collections
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +27,7 @@ from dr_evt_market import (
 )
 
 _DATA = Path(__file__).with_name("data")
+_ROOT = Path(__file__).resolve().parents[3]
 
 
 class _BadMechanism(Mechanism):
@@ -115,6 +119,73 @@ class MarketTests(unittest.TestCase):
                 platforms = federation(Path(directory) / "platforms", share=0.1)
                 with self.assertRaises(MarketError):
                     run(jobs, platforms, _BadMechanism(mode))
+
+    def test_command_line_runs_and_prepares(self) -> None:
+        """The command line runs the fixture and prepares two trace sources."""
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = os.pathsep.join(
+            (str(_ROOT / "install/lib/python"), str(_ROOT / "python"))
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "dr_evt_market",
+                    "run",
+                    "--jobs",
+                    str(_DATA / "jobs.csv"),
+                    "--out",
+                    str(root / "run"),
+                    "--share",
+                    "0.1",
+                    "--platforms",
+                    "corona,lassen,tioga,tuolumne",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertIn("windows=9", completed.stdout.splitlines())
+            self.assertIn("routed=18", completed.stdout.splitlines())
+            self.assertIn("rejected=2", completed.stdout.splitlines())
+            self.assertIn(
+                "routed_sha256="
+                "3cca4e4cce7106a213753c9fff762c62a354b9e680b66195fef59465f51c4ae9",
+                completed.stdout.splitlines(),
+            )
+
+            prepared_path = root / "prepared.csv"
+            prepared = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "dr_evt_market",
+                    "prepare",
+                    "--trace",
+                    f"corona={_DATA / 'trace.csv'}",
+                    "--trace",
+                    f"tioga={_DATA / 'trace.csv'}",
+                    "--out",
+                    str(prepared_path),
+                    "--start",
+                    "1000",
+                    "--hours",
+                    "0.05",
+                    "--per-platform",
+                    "corona,lassen",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertIn("kept=10", prepared.stdout.splitlines())
+            jobs = read_jobs(prepared_path)
+            self.assertEqual(len(jobs), 10)
+            self.assertEqual({job.source for job in jobs}, {"corona", "tioga"})
 
 
 if __name__ == "__main__":

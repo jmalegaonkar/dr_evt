@@ -6,3 +6,8 @@
 ################################################################################
 
 """Entry point for python -m dr_evt_market."""
+
+from .cli import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
