@@ -9,52 +9,66 @@
 
 import csv
 import math
+from collections import namedtuple
 from pathlib import Path
 
+Row = namedtuple("Row", "source order submit nodes limit runtime user ran")
 
-def _read_trace(source: str, path: str | Path, trace_format: str) -> list[dict]:
+
+def read_lc(source: str, path: str | Path) -> list[Row]:
+    """Read one pseudonymized LC trace."""
     records = []
     with Path(path).open(newline="", encoding="utf-8") as stream:
         for order, row in enumerate(csv.DictReader(stream)):
-            if trace_format == "lc":
-                raw_nodes = row["job.node.count"]
-                nodes = None if raw_nodes in {"", "-"} else int(float(raw_nodes))
-                no_start = row["t_run"].strip() == "-"
-                if no_start:
-                    runtime = None
-                else:
-                    begin = math.floor(float(row["t_run"]))
-                    end = math.floor(float(row["t_inactive"]))
-                    runtime = end - begin
-                try:
-                    limit = float(row["user_time_limit"])
-                except (TypeError, ValueError):
-                    limit = float(row["time_limit"])
-                submit = math.floor(float(row["t_submit"]))
-                user = row["user.name"]
+            raw_nodes = row["job.node.count"]
+            nodes = None if raw_nodes in {"", "-"} else int(float(raw_nodes))
+            ran = row["t_run"].strip() != "-"
+            if ran:
+                begin = math.floor(float(row["t_run"]))
+                end = math.floor(float(row["t_inactive"]))
+                runtime = end - begin
             else:
-                raw_nodes = row["num_nodes"]
-                nodes = None if raw_nodes in {"", "-"} else int(float(raw_nodes))
+                runtime = None
+            try:
+                limit = float(row["user_time_limit"])
+            except (TypeError, ValueError):
                 limit = float(row["time_limit"])
-                raw_runtime = row.get("actual_run_time")
-                runtime = (
-                    None
-                    if raw_runtime in (None, "")
-                    else math.floor(float(raw_runtime))
-                )
-                no_start = False
-                submit = math.floor(float(row["job_submit_time"]))
-                user = row.get("user")
             records.append(
-                dict(
-                    source=source,
-                    order=order,
-                    submit=submit,
-                    nodes=nodes,
-                    limit=math.floor(limit),
-                    runtime=runtime,
-                    user=user,
-                    no_start=no_start,
+                Row(
+                    source,
+                    order,
+                    math.floor(float(row["t_submit"])),
+                    nodes,
+                    math.floor(limit),
+                    runtime,
+                    row["user.name"],
+                    ran,
+                )
+            )
+    return records
+
+
+def read_simple(source: str, path: str | Path) -> list[Row]:
+    """Read one DR_EVT simple trace."""
+    records = []
+    with Path(path).open(newline="", encoding="utf-8") as stream:
+        for order, row in enumerate(csv.DictReader(stream)):
+            raw_nodes = row["num_nodes"]
+            nodes = None if raw_nodes in {"", "-"} else int(float(raw_nodes))
+            raw_runtime = row.get("actual_run_time")
+            runtime = (
+                None if raw_runtime in (None, "") else math.floor(float(raw_runtime))
+            )
+            records.append(
+                Row(
+                    source,
+                    order,
+                    math.floor(float(row["job_submit_time"])),
+                    nodes,
+                    math.floor(float(row["time_limit"])),
+                    runtime,
+                    row.get("user"),
+                    True,
                 )
             )
     return records

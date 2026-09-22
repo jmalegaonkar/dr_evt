@@ -26,7 +26,10 @@ class JobTests(unittest.TestCase):
         self.assertEqual(jobs[0].job_id, "j000001")
         self.assertEqual(jobs[3].requires, frozenset({"gpu", "nvidia"}))
         self.assertEqual(jobs[13].num_nodes, 120)
-        self.assertFalse(hasattr(jobs[0], "source"))
+        self.assertEqual(
+            (jobs[0].source, jobs[0].user, jobs[0].persona),
+            ("tioga", "1", "tier"),
+        )
 
     def test_job_freezes_requirements_and_duplicate_ids_fail(self) -> None:
         """Job freezes tags, and the reader rejects duplicate identifiers."""
@@ -45,7 +48,7 @@ class JobTests(unittest.TestCase):
 
     def test_prepare_lc_interval_and_summary(self) -> None:
         """LC preparation filters one interval and counts each drop reason."""
-        jobs, summary, rows = prepare(
+        jobs, summary = prepare(
             {"tioga": _DATA / "trace.csv"}, start=1000, hours=0.05, seed=3
         )
         self.assertEqual(
@@ -63,32 +66,32 @@ class JobTests(unittest.TestCase):
         )
         self.assertEqual([job.submit_s for job in jobs], [0, 35, 85, 115, 174])
         self.assertEqual(jobs[0].limit_s, 120)
-        self.assertEqual(rows[0]["source"], "tioga")
+        self.assertEqual(jobs[0].source, "tioga")
         self.assertTrue(all(job.requires == {"gpu"} for job in jobs))
 
     def test_sources_merge_on_one_origin(self) -> None:
         """Sources share one clock and contribute to persona identity."""
         traces = {"beta": _DATA / "trace.csv", "alpha": _DATA / "trace.csv"}
-        jobs, summary, rows = prepare(traces, start=1000, hours=0.05, seed=0)
+        jobs, summary = prepare(traces, start=1000, hours=0.05, seed=0)
         self.assertEqual(summary["kept:alpha"], 5)
         self.assertEqual(summary["kept:beta"], 5)
         self.assertEqual([job.submit_s for job in jobs[:2]], [0, 0])
-        self.assertEqual([row["source"] for row in rows[:2]], ["alpha", "beta"])
-        self.assertEqual([row["user"] for row in rows[:2]], ["2", "2"])
-        self.assertEqual([row["persona"] for row in rows[:2]], ["value", "tier"])
+        self.assertEqual([job.source for job in jobs[:2]], ["alpha", "beta"])
+        self.assertEqual([job.user for job in jobs[:2]], ["2", "2"])
+        self.assertEqual([job.persona for job in jobs[:2]], ["value", "tier"])
 
     def test_prepare_is_deterministic_and_round_trips(self) -> None:
         """A seed fixes output bytes, and written rows read back as jobs."""
         traces = {"tioga": _DATA / "trace.csv"}
-        jobs, _, rows = prepare(traces, start=1000, hours=0.05, seed=4)
-        _, _, same_rows = prepare(traces, start=1000, hours=0.05, seed=4)
-        _, _, other_rows = prepare(traces, start=1000, hours=0.05, seed=5)
+        jobs, _ = prepare(traces, start=1000, hours=0.05, seed=4)
+        same_jobs, _ = prepare(traces, start=1000, hours=0.05, seed=4)
+        other_jobs, _ = prepare(traces, start=1000, hours=0.05, seed=5)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             first, second, other = root / "a.csv", root / "b.csv", root / "c.csv"
-            write_jobs(rows, first)
-            write_jobs(same_rows, second)
-            write_jobs(other_rows, other)
+            write_jobs(jobs, first)
+            write_jobs(same_jobs, second)
+            write_jobs(other_jobs, other)
             self.assertEqual(first.read_bytes(), second.read_bytes())
             self.assertNotEqual(first.read_bytes(), other.read_bytes())
             self.assertEqual(read_jobs(first), jobs)
@@ -101,8 +104,8 @@ class JobTests(unittest.TestCase):
                 "job_submit_time,num_nodes,time_limit,user\n" "100,2,60,fixed-user\n",
                 encoding="utf-8",
             )
-            jobs, _, rows = prepare({"tioga": trace}, trace_format="simple", seed=8)
-        self.assertEqual(rows[0]["persona"], "value")
+            jobs, _ = prepare({"tioga": trace}, trace_format="simple", seed=8)
+        self.assertEqual(jobs[0].persona, "value")
         self.assertEqual(jobs[0].bid, 4.6178)
 
     def test_simple_times_are_floored_sorted_and_shifted(self) -> None:
@@ -115,7 +118,7 @@ class JobTests(unittest.TestCase):
                 "10.8,1,4.2,2.7\n",
                 encoding="utf-8",
             )
-            jobs, summary, _ = prepare({"simple": trace}, trace_format="simple")
+            jobs, summary = prepare({"simple": trace}, trace_format="simple")
         self.assertEqual([job.submit_s for job in jobs], [0, 2])
         self.assertEqual([job.limit_s for job in jobs], [4, 5])
         self.assertEqual([job.runtime_s for job in jobs], [2, 3])
@@ -156,14 +159,14 @@ class JobTests(unittest.TestCase):
     def test_prepare_per_platform_bids_round_trip(self) -> None:
         """Prepared mapped bids are deterministic and retain dynamic columns."""
         traces = {"tioga": _DATA / "trace.csv"}
-        jobs, _, rows = prepare(
+        jobs, _ = prepare(
             traces,
             start=1000,
             hours=0.05,
             seed=4,
             per_platform=("corona", "lassen"),
         )
-        again, _, _ = prepare(
+        again, _ = prepare(
             traces,
             start=1000,
             hours=0.05,
@@ -174,7 +177,7 @@ class JobTests(unittest.TestCase):
         self.assertEqual(jobs, again)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "mapped.csv"
-            write_jobs(rows, path)
+            write_jobs(jobs, path)
             header = path.read_text(encoding="utf-8").splitlines()[0]
             self.assertIn("bid,bid:corona,bid:lassen,requires", header)
             self.assertEqual(read_jobs(path), jobs)

@@ -10,8 +10,20 @@
 import math
 
 from .bids import persona_bid
-from .job import _JOB_FIELDS, Job
-from .traces import _read_trace
+from .job import Job
+from .traces import read_lc, read_simple
+
+
+def _drop_reason(row):
+    if row.nodes is None or row.nodes < 1:
+        return "no_nodes"
+    if row.limit < 1:
+        return "no_limit"
+    if not row.ran:
+        return "no_start"
+    if row.runtime is not None and row.runtime < 1:
+        return "bad_runtime"
+    return None
 
 
 def prepare(
@@ -23,22 +35,24 @@ def prepare(
     seed=0,
     requires="gpu",
     per_platform=None,
-) -> tuple[list[Job], dict[str, int], list[dict]]:
+) -> tuple[list[Job], dict[str, int]]:
     """Prepare deterministic jobs from one interval across named traces."""
-    if trace_format not in {"lc", "simple"}:
+    readers = {"lc": read_lc, "simple": read_simple}
+    if trace_format not in readers:
         raise ValueError("trace_format must be 'lc' or 'simple'")
+    reader = readers[trace_format]
     records = []
     for source, path in traces.items():
-        records.extend(_read_trace(source, path, trace_format))
-    records.sort(key=lambda row: (row["submit"], row["source"], row["order"]))
+        records.extend(reader(source, path))
+    records.sort(key=lambda row: (row.submit, row.source, row.order))
 
     lower = (
-        records[0]["submit"]
+        records[0].submit
         if start is None and records
         else math.floor(float(start or 0))
     )
     upper = math.inf if hours is None else lower + float(hours) * 3600
-    selected = [row for row in records if lower <= row["submit"] < upper]
+    selected = [row for row in records if lower <= row.submit < upper]
     summary = {
         "read": len(records),
         "kept": 0,
@@ -52,56 +66,33 @@ def prepare(
 
     kept = []
     for record in selected:
-        if record["nodes"] is None or record["nodes"] < 1:
-            reason = "no_nodes"
-        elif record["limit"] < 1:
-            reason = "no_limit"
-        elif record["no_start"]:
-            reason = "no_start"
-        elif record["runtime"] is not None and record["runtime"] < 1:
-            reason = "bad_runtime"
-        else:
+        reason = _drop_reason(record)
+        if reason is None:
             kept.append(record)
             continue
         summary[reason] += 1
 
-    origin = kept[0]["submit"] if kept else 0
-    requirement_text = " ".join(requires.split())
-    requirement_set = frozenset(requirement_text.split())
-    jobs, rows = [], []
+    origin = kept[0].submit if kept else 0
+    requirement_set = frozenset(requires.split())
+    jobs = []
     for index, record in enumerate(kept, start=1):
         job_id = f"j{index:06d}"
-        user = record["user"] if record["user"] is not None else job_id
-        persona, bid = persona_bid(seed, record["source"], user, job_id, per_platform)
-        job = Job(
-            job_id,
-            record["submit"] - origin,
-            record["nodes"],
-            record["limit"],
-            bid,
-            requirement_set,
-            record["runtime"],
-        )
-        jobs.append(job)
-        rows.append(
-            dict(
-                zip(
-                    _JOB_FIELDS,
-                    (
-                        job.job_id,
-                        job.submit_s,
-                        job.num_nodes,
-                        job.limit_s,
-                        job.bid,
-                        requirement_text,
-                        "" if job.runtime_s is None else job.runtime_s,
-                        record["source"],
-                        user,
-                        persona,
-                    ),
-                )
+        user = record.user if record.user is not None else job_id
+        persona, bid = persona_bid(seed, record.source, user, job_id, per_platform)
+        jobs.append(
+            Job(
+                job_id,
+                record.submit - origin,
+                record.nodes,
+                record.limit,
+                bid,
+                requirement_set,
+                record.runtime,
+                record.source,
+                user,
+                persona,
             )
         )
-        summary[f"kept:{record['source']}"] += 1
+        summary[f"kept:{record.source}"] += 1
     summary["kept"] = len(jobs)
-    return jobs, summary, rows
+    return jobs, summary

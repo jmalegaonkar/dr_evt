@@ -36,6 +36,9 @@ class Job:
     bid: float | dict[str, float]
     requires: frozenset[str] = frozenset()
     runtime_s: int | None = None
+    source: str = ""
+    user: str = ""
+    persona: str = ""
 
     def __post_init__(self) -> None:
         """Freeze the hardware requirements."""
@@ -68,6 +71,9 @@ def read_jobs(path: str | Path) -> list[Job]:
                 platform_bid or float(row["bid"]),
                 frozenset((row.get("requires") or "").split()),
                 None if runtime in (None, "") else int(runtime),
+                row.get("source") or "",
+                row.get("user") or "",
+                row.get("persona") or "",
             )
             if job.job_id in seen:
                 raise ValueError(f"duplicate job_id {job.job_id!r}")
@@ -76,20 +82,31 @@ def read_jobs(path: str | Path) -> list[Job]:
     return jobs
 
 
-def write_jobs(rows: list[dict], path: str | Path) -> None:
-    """Write prepared job rows with stable columns and Unix line endings."""
+def write_jobs(jobs: list[Job], path: str | Path) -> None:
+    """Write jobs with stable columns and Unix line endings."""
     platforms = sorted(
-        {name for row in rows if isinstance(row["bid"], dict) for name in row["bid"]}
+        {name for job in jobs if isinstance(job.bid, dict) for name in job.bid}
     )
     fields = _JOB_FIELDS[:5] + tuple(f"bid:{name}" for name in platforms)
     fields += _JOB_FIELDS[5:]
     with Path(path).open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
-        for row in rows:
-            output = dict(row)
-            if isinstance(output["bid"], dict):
-                bid = output["bid"]
-                output["bid"] = ""
-                output.update({f"bid:{name}": bid.get(name, "") for name in platforms})
+        for job in jobs:
+            output = {
+                "job_id": job.job_id,
+                "job_submit_time": job.submit_s,
+                "num_nodes": job.num_nodes,
+                "time_limit": job.limit_s,
+                "bid": "" if isinstance(job.bid, dict) else job.bid,
+                "requires": " ".join(sorted(job.requires)),
+                "runtime": "" if job.runtime_s is None else job.runtime_s,
+                "source": job.source,
+                "user": job.user,
+                "persona": job.persona,
+            }
+            if isinstance(job.bid, dict):
+                output.update(
+                    {f"bid:{name}": job.bid.get(name, "") for name in platforms}
+                )
             writer.writerow(output)
