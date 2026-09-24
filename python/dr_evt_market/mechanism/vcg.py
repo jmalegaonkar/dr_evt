@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from .base import Decision, Mechanism, candidates
 
 _TIE_BREAK = 1.0e-9
+_TOLERANCE = 1.0e-9
 
 
 @dataclass(frozen=True)
@@ -50,10 +51,7 @@ def _solve(jobs, platforms, free_nodes, time_limit_s, excluded=None):
     from scipy.optimize import Bounds, LinearConstraint, milp
 
     objective = np.asarray(
-        [
-            -variable.net + _TIE_BREAK * variable.index - _TIE_BREAK
-            for variable in variables
-        ]
+        [-variable.net + _TIE_BREAK * variable.index for variable in variables]
     )
     rows = []
     upper = []
@@ -82,6 +80,13 @@ def _solve(jobs, platforms, free_nodes, time_limit_s, excluded=None):
     return chosen, sum(variable.net for variable in chosen.values())
 
 
+def _posted_price_offer(job, platforms, free_nodes):
+    for name, (cost, _) in candidates(job, platforms, free_nodes).items():
+        if job.price(name) <= platforms[name].price_per_node_hour + _TOLERANCE:
+            return name, cost
+    return None
+
+
 class Vcg(Mechanism):
     """Maximize net value and charge each winner its Clarke pivot."""
 
@@ -95,10 +100,20 @@ class Vcg(Mechanism):
         """Return welfare-maximizing decisions in batch order."""
         jobs = list(jobs)
         chosen, welfare = _solve(jobs, platforms, free_nodes, self.time_limit_s)
+        left = dict(free_nodes)
+        for variable in chosen.values():
+            left[variable.platform] -= variable.nodes
         decisions = []
         for job_index, job in enumerate(jobs):
             variable = chosen.get(job_index)
             if variable is None:
+                # A job bidding exactly the posted price adds no welfare, so the
+                # solve may leave it out. It takes nodes no winner uses and
+                # displaces nobody, so its pivot is zero and it pays its cost.
+                offer = _posted_price_offer(job, platforms, left)
+                if offer is not None:
+                    left[offer[0]] -= job.num_nodes
+                    decisions.append(Decision(job.job_id, *offer))
                 continue
             _, without = _solve(
                 jobs, platforms, free_nodes, self.time_limit_s, job_index

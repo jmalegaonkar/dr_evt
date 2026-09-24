@@ -60,7 +60,9 @@ the execution limit and carries the original requested limit in `requested`.
 `candidates` keeps platforms that match the hardware, have enough free nodes, were
 bid on, and have a posted price no greater than the bid. `Vcg` maximizes total reported
 value minus platform cost subject to one platform per job and node capacity. Its
-Clarke pivot is the second price generalized to several platforms with capacity.
+Clarke pivot is the second price generalized to several platforms with capacity. A job
+that bids exactly the posted price adds nothing to that total; it takes nodes the
+winners leave free, in queue order, and pays the posted price.
 
 VCG lets users keep the savings between their values and the charges above posted
 cost. Pay what you bid assigns offers greedily and gives that surplus to the center.

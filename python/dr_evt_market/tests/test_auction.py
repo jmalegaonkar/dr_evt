@@ -106,8 +106,7 @@ def _brute(jobs, platforms, free_nodes, excluded=None):
             sum(indexes[i, name] for i, name in enumerate(choice) if name is not None)
             * _TIE_BREAK
         )
-        bonus = sum(name is not None for name in choice) * _TIE_BREAK
-        score = welfare - penalty + bonus
+        score = welfare - penalty
         if score > best_score:
             best_score, best_choice, best_welfare = score, choice, welfare
     chosen = {i: name for i, name in enumerate(best_choice) if name is not None}
@@ -217,6 +216,24 @@ class AuctionTests(unittest.TestCase):
         self.assertEqual(len(decisions), 1)
         self.assertEqual(decisions[0].job_id, job.job_id)
         self.assertAlmostEqual(decisions[0].charge, platform.cost(job))
+
+    def test_posted_price_bids_take_leftover_nodes(self) -> None:
+        """Jobs bidding exactly the posted price run on nodes winners leave free."""
+        platform = _Platform("only", 10, 2.0, frozenset({"gpu"}))
+        platforms = {platform.name: platform}
+        tier = Job("tier", 0, 1, 360, 2.5, {"gpu"})
+        stickers = [Job(f"sticker{i}", 0, 1, 360, 2.0, {"gpu"}) for i in range(5)]
+        jobs = [tier, *stickers]
+
+        roomy = Vcg().decide(jobs, platforms, {"only": 10})
+        self.assertEqual([item.job_id for item in roomy], [job.job_id for job in jobs])
+        for decision, job in zip(roomy[1:], stickers):
+            self.assertAlmostEqual(decision.charge, platform.cost(job))
+
+        crowded = Vcg().decide(jobs, platforms, {"only": 3})
+        self.assertEqual(
+            [item.job_id for item in crowded], ["tier", "sticker0", "sticker1"]
+        )
 
     def test_first_price_is_feasible_and_bounded_by_vcg(self) -> None:
         """Greedy winners fit, pay their values, and cannot beat VCG welfare."""
