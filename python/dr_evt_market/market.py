@@ -191,6 +191,7 @@ def run(
         if (
             not winners
             and queue
+            and arrival == len(arrivals)
             and all(
                 platform.free_nodes() == platform.exposed_nodes
                 for platform in platforms.values()
