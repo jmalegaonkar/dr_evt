@@ -130,22 +130,26 @@ class AuctionTests(unittest.TestCase):
             }
             scalar = Job("scalar", 0, 4, 360, 3.0, {"gpu"})
             offers = candidates(scalar, platforms, free)
-            self.assertEqual(list(offers), ["corona", "lassen"])
-            self.assertEqual(offers["corona"], (0.8, 1.2))
-            self.assertEqual(offers["lassen"], (1.2, 1.2))
+            self.assertEqual(list(offers), ["corona", "tuolumne"])
+            self.assertEqual(offers["corona"], (0.6, 1.2))
+            self.assertAlmostEqual(offers["tuolumne"][0], 0.076)
+            self.assertEqual(offers["tuolumne"][1], 1.2)
             mapped = Job(
                 "mapped",
                 0,
                 2,
                 360,
-                {"lassen": 2.5, "tioga": 6.5, "tuolumne": 8.5},
+                {"matrix": 1.6, "tioga": 2.8, "tuolumne": 0.2},
                 {"gpu"},
             )
             self.assertEqual(
+                list(candidates(mapped, platforms, free)),
+                ["matrix", "tioga", "tuolumne"],
+            )
+            free["matrix"] = 1
+            self.assertEqual(
                 list(candidates(mapped, platforms, free)), ["tioga", "tuolumne"]
             )
-            free["tioga"] = 1
-            self.assertEqual(list(candidates(mapped, platforms, free)), ["tuolumne"])
 
     def test_vcg_matches_brute_force(self) -> None:
         """The optimizer and pivot charges match exhaustive search."""

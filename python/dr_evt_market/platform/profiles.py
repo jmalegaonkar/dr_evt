@@ -13,12 +13,12 @@ from .base import Platform
 
 
 class Corona(Platform):
-    """The Corona AMD GPU platform profile."""
+    """The Corona GPU platform profile."""
 
     name = "corona"
     total_nodes = 121
     price_per_node_hour = 1.5
-    hardware = frozenset({"cpu", "gpu", "amd"})
+    hardware = frozenset({"cpu", "gpu"})
 
 
 class Dane(Platform):
@@ -26,45 +26,39 @@ class Dane(Platform):
 
     name = "dane"
     total_nodes = 1544
-    price_per_node_hour = .18
+    price_per_node_hour = 0.18
     hardware = frozenset({"cpu"})
 
 
-class Lassen(Platform):
-    """The Lassen NVIDIA GPU platform profile."""
+class Matrix(Platform):
+    """The Matrix GPU platform profile."""
 
-    name = "lassen"
-    total_nodes = 795
-    price_per_node_hour = 3.0
-    hardware = frozenset({"cpu", "gpu", "nvidia"})
+    name = "matrix"
+    total_nodes = 30
+    price_per_node_hour = 1.6
+    hardware = frozenset({"cpu", "gpu"})
 
 
 class Tioga(Platform):
-    """The Tioga AMD GPU platform profile."""
+    """The Tioga GPU platform profile."""
 
     name = "tioga"
     total_nodes = 32
     price_per_node_hour = 2.7
-    hardware = frozenset({"cpu", "gpu", "amd"})
+    hardware = frozenset({"cpu", "gpu"})
 
 
 class Tuolumne(Platform):
-    """The Tuolumne AMD GPU platform profile."""
+    """The Tuolumne GPU platform profile."""
 
     name = "tuolumne"
     total_nodes = 1152
-    price_per_node_hour = .19
-    hardware = frozenset({"cpu", "gpu", "amd"})
+    price_per_node_hour = 0.19
+    hardware = frozenset({"cpu", "gpu"})
 
-class Matrix(Platform):
-    """The Matrix NVIDIA GPU platform profile."""
-    name = "matrix"
-    total_nodes = 30
-    price_per_node_hour = 1.6
-    hardware = frozenset({"cpu", "gpu", "nvidia"})
 
-PLATFORMS = (Corona, Dane, Lassen, Tioga, Tuolumne)
-DEFAULT_FEDERATION = ("corona", "lassen", "tioga", "tuolumne")
+PLATFORMS = (Corona, Dane, Matrix, Tioga, Tuolumne)
+DEFAULT_FEDERATION = ("corona", "dane", "matrix", "tioga", "tuolumne")
 _PROFILES = {profile.name: profile for profile in PLATFORMS}
 
 

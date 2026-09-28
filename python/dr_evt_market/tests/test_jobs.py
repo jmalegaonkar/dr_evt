@@ -24,12 +24,17 @@ class JobTests(unittest.TestCase):
         jobs = read_jobs(_DATA / "jobs.csv")
         self.assertEqual(len(jobs), 20)
         self.assertEqual(jobs[0].job_id, "j000001")
-        self.assertEqual(jobs[3].requires, frozenset({"gpu", "nvidia"}))
-        self.assertEqual(jobs[13].num_nodes, 120)
+        self.assertEqual(jobs[3].requires, frozenset({"gpu"}))
+        self.assertEqual(jobs[13].num_nodes, 155)
         self.assertEqual(
             (jobs[0].source, jobs[0].user, jobs[0].persona),
-            ("tioga", "1", "tier"),
+            ("corona", "1", "tier"),
         )
+        self.assertEqual(
+            {job.source for job in jobs},
+            {"corona", "dane", "matrix", "tioga", "tuolumne"},
+        )
+        self.assertEqual(sum(isinstance(job.bid, dict) for job in jobs), 3)
 
     def test_job_freezes_requirements_and_duplicate_ids_fail(self) -> None:
         """Job freezes tags, and the reader rejects duplicate identifiers."""
@@ -50,7 +55,7 @@ class JobTests(unittest.TestCase):
         """LC preparation filters one interval and counts each drop reason."""
         jobs, summary = prepare(
             {"tioga": _DATA / "trace.csv"},
-            home_prices={"tioga": 6.0},
+            home_prices={"tioga": 2.7},
             start=1000,
             hours=0.05,
             seed=3,
@@ -72,7 +77,16 @@ class JobTests(unittest.TestCase):
         self.assertEqual(jobs[0].limit_s, 40)
         self.assertEqual(jobs[0].requested_s, 120)
         self.assertEqual(jobs[0].source, "tioga")
-        self.assertTrue(all(job.requires == {"gpu"} for job in jobs))
+        self.assertEqual(
+            [job.requires for job in jobs],
+            [
+                frozenset({"gpu"}),
+                frozenset(),
+                frozenset({"gpu"}),
+                frozenset({"gpu"}),
+                frozenset({"gpu"}),
+            ],
+        )
 
     def test_sources_merge_on_one_origin(self) -> None:
         """Sources share one clock and contribute to persona identity."""
@@ -94,7 +108,7 @@ class JobTests(unittest.TestCase):
     def test_prepare_is_deterministic_and_round_trips(self) -> None:
         """A seed fixes output bytes, and written rows read back as jobs."""
         traces = {"tioga": _DATA / "trace.csv"}
-        options = {"home_prices": {"tioga": 6.0}, "start": 1000, "hours": 0.05}
+        options = {"home_prices": {"tioga": 2.7}, "start": 1000, "hours": 0.05}
         jobs, _ = prepare(traces, seed=4, **options)
         same_jobs, _ = prepare(traces, seed=4, **options)
         other_jobs, _ = prepare(traces, seed=5, **options)
@@ -118,12 +132,30 @@ class JobTests(unittest.TestCase):
             )
             jobs, _ = prepare(
                 {"tioga": trace},
-                home_prices={"tioga": 6.0},
+                home_prices={"tioga": 2.7},
                 trace_format="simple",
                 seed=8,
             )
         self.assertEqual(jobs[0].persona, "value")
-        self.assertEqual(jobs[0].bid, 27.7068)
+        self.assertEqual(jobs[0].bid, 12.468)
+
+    def test_gpu_fraction_and_requires_override(self) -> None:
+        """GPU draws are per job, and an explicit requirement overrides them."""
+        traces = {"tioga": _DATA / "trace.csv"}
+        options = {
+            "home_prices": {"tioga": 2.7},
+            "start": 1000,
+            "hours": 0.05,
+            "seed": 4,
+        }
+        cpu_jobs, _ = prepare(traces, gpu_fraction=0.0, **options)
+        gpu_jobs, _ = prepare(traces, gpu_fraction=1.0, **options)
+        overridden, _ = prepare(traces, gpu_fraction=0.0, requires="gpu", **options)
+        self.assertTrue(all(not job.requires for job in cpu_jobs))
+        self.assertTrue(all(job.requires == {"gpu"} for job in gpu_jobs))
+        self.assertTrue(all(job.requires == {"gpu"} for job in overridden))
+        with self.assertRaises(ValueError):
+            prepare(traces, gpu_fraction=1.1, **options)
 
     def test_simple_times_are_floored_sorted_and_shifted(self) -> None:
         """Simple fractional times use the earliest floored submit as zero."""
@@ -163,11 +195,11 @@ class JobTests(unittest.TestCase):
         """Mapped bids select exact platforms and override a scalar bid."""
         jobs = read_jobs(_DATA / "jobs.csv")
         self.assertIsInstance(jobs[0].bid, float)
-        self.assertEqual(jobs[0].price("anything"), 2.2)
-        self.assertEqual(jobs[3].bid, {"lassen": 3.2, "tuolumne": 8.5})
+        self.assertEqual(jobs[0].price("anything"), 0.3)
+        self.assertEqual(jobs[3].bid, {"tuolumne": 0.5})
         self.assertIsNone(jobs[3].price("corona"))
-        self.assertEqual(jobs[9].price("corona"), 20.0)
-        self.assertEqual(jobs[14].bid, {"corona": 1.5})
+        self.assertEqual(jobs[9].price("matrix"), 16.0)
+        self.assertEqual(jobs[14].bid, {"corona": 1.4})
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "both.csv"
@@ -183,35 +215,35 @@ class JobTests(unittest.TestCase):
         traces = {"tioga": _DATA / "trace.csv"}
         jobs, _ = prepare(
             traces,
-            home_prices={"tioga": 6.0},
+            home_prices={"tioga": 2.7},
             start=1000,
             hours=0.05,
             seed=4,
-            per_platform=("corona", "lassen"),
+            per_platform=("corona", "matrix"),
         )
         again, _ = prepare(
             traces,
-            home_prices={"tioga": 6.0},
+            home_prices={"tioga": 2.7},
             start=1000,
             hours=0.05,
             seed=4,
-            per_platform=("corona", "lassen"),
+            per_platform=("corona", "matrix"),
         )
-        self.assertTrue(all(list(job.bid) == ["corona", "lassen"] for job in jobs))
-        self.assertEqual(jobs[0].bid, {"corona": 10.8524, "lassen": 11.1589})
+        self.assertTrue(all(list(job.bid) == ["corona", "matrix"] for job in jobs))
+        self.assertEqual(jobs[0].bid, {"corona": 4.8836, "matrix": 5.0215})
         self.assertEqual(jobs, again)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "mapped.csv"
             write_jobs(jobs, path)
             header = path.read_text(encoding="utf-8").splitlines()[0]
-            self.assertIn("bid,bid:corona,bid:lassen,requires", header)
+            self.assertIn("bid,bid:corona,bid:matrix,requires", header)
             self.assertEqual(read_jobs(path), jobs)
 
     def test_limit_can_follow_runtime_or_request(self) -> None:
         """Preparation carries the request and selects either limit source."""
         traces = {"tioga": _DATA / "trace.csv"}
         options = {
-            "home_prices": {"tioga": 6.0},
+            "home_prices": {"tioga": 2.7},
             "start": 1000,
             "hours": 0.05,
         }

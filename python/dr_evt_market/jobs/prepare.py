@@ -8,8 +8,9 @@
 """From raw traces to a job stream: interval, cleaning, ids, bids."""
 
 import math
+from numbers import Real
 
-from .bids import persona_bid
+from .bids import job_generator, persona_bid
 from .job import Job
 from .traces import read_lc, read_simple
 
@@ -34,7 +35,8 @@ def prepare(
     start=None,
     hours=None,
     seed=0,
-    requires="gpu",
+    gpu_fraction=0.5,
+    requires=None,
     per_platform=None,
     limit_from="runtime",
 ) -> tuple[list[Job], dict[str, int]]:
@@ -46,6 +48,12 @@ def prepare(
         raise ValueError("every trace source must have a home price")
     if limit_from not in {"runtime", "request"}:
         raise ValueError("limit_from must be 'runtime' or 'request'")
+    if (
+        isinstance(gpu_fraction, bool)
+        or not isinstance(gpu_fraction, Real)
+        or not 0 <= gpu_fraction <= 1
+    ):
+        raise ValueError("gpu_fraction must be a number in [0, 1]")
     reader = readers[trace_format]
     records = []
     for source, path in traces.items():
@@ -79,11 +87,12 @@ def prepare(
         summary[reason] += 1
 
     origin = kept[0].submit if kept else 0
-    requirement_set = frozenset(requires.split())
+    requirement_override = None if requires is None else frozenset(requires.split())
     jobs = []
     for index, record in enumerate(kept, start=1):
         job_id = f"j{index:06d}"
         user = record.user if record.user is not None else job_id
+        job_rng = job_generator(seed, record.source, user, job_id)
         persona, bid = persona_bid(
             seed,
             record.source,
@@ -91,7 +100,13 @@ def prepare(
             job_id,
             home_prices[record.source],
             per_platform,
+            job_rng=job_rng,
         )
+        requirement_set = requirement_override
+        if requirement_set is None:
+            requirement_set = (
+                frozenset({"gpu"}) if job_rng.random() < gpu_fraction else frozenset()
+            )
         limit = (
             record.runtime
             if limit_from == "runtime" and record.runtime is not None

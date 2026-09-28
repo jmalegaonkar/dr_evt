@@ -53,7 +53,7 @@ class GridRegretTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             platforms = federation(Path(directory), share=0.1, names=("corona",))
             regret = grid_regret(FirstPrice(), [job], platforms, {"corona": 12})
-        self.assertAlmostEqual(regret["shade"], (3.0 - 2.0) * 2 * 360 / 3600)
+        self.assertAlmostEqual(regret["shade"], (3.0 - 1.5) * 2 * 360 / 3600)
 
 
 @unittest.skipUnless(_TORCH, "RegretFormer needs torch")

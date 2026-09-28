@@ -83,6 +83,14 @@ class MarketTests(unittest.TestCase):
                 ("j000015", "unaffordable", 180),
             ],
         )
+        self.assertEqual(
+            [row.job_id for row in result.routed if row.window == 0],
+            ["j000001", "j000004", "j000005"],
+        )
+        self.assertEqual(
+            {row.platform for row in result.routed},
+            {"corona", "dane", "matrix", "tioga", "tuolumne"},
+        )
         for row in result.routed:
             self.assertEqual(row.begin_s, row.window_s)
             self.assertEqual(row.end_s, row.begin_s + by_id[row.job_id].limit_s)
@@ -100,7 +108,7 @@ class MarketTests(unittest.TestCase):
         # This changes only when the fixture or the model changes.
         self.assertEqual(
             outputs["sha256"],
-            "3cca4e4cce7106a213753c9fff762c62a354b9e680b66195fef59465f51c4ae9",
+            "d6d2f7395217174fef5757171498d3876bcf04c279b5f908493d82dfc72689c5",
         )
 
     def test_routed_output_is_byte_identical(self) -> None:
@@ -133,26 +141,17 @@ class MarketTests(unittest.TestCase):
                 with self.assertRaises(MarketError):
                     run(jobs, platforms, _BadMechanism(mode))
 
-    def test_waiting_names_what_keeps_a_job_from_running(self) -> None:
-        """Without Lassen, NVIDIA jobs wait for hardware, not for being oversize."""
-        jobs = read_jobs(_DATA / "jobs.csv")
+    def test_cpu_only_federation_reports_gpu_hardware_waiting(self) -> None:
+        """A GPU job waits for hardware in a CPU-only federation."""
+        jobs = [Job("gpu", 0, 1, 60, 1.0, {"gpu"})]
         with tempfile.TemporaryDirectory() as directory:
-            platforms = federation(
-                Path(directory), share=0.1, names=("corona", "tioga", "tuolumne")
-            )
+            platforms = federation(Path(directory), share=0.1, names=("dane",))
             result = run(jobs, platforms, Vcg())
         self.assertEqual(
             [(row.job_id, row.reason) for row in result.waiting],
-            [
-                ("j000004", "hardware"),
-                ("j000009", "hardware"),
-                ("j000014", "oversize"),
-                ("j000015", "unaffordable"),
-                ("j000016", "unaffordable"),
-                ("j000018", "hardware"),
-            ],
+            [("gpu", "hardware")],
         )
-        self.assertEqual(len(result.routed) + len(result.waiting), len(jobs))
+        self.assertFalse(result.routed)
 
     def test_leaving_a_job_waiting_on_free_nodes_raises(self) -> None:
         """A mechanism must place every batch job that fits the nodes left over."""
@@ -198,19 +197,19 @@ class MarketTests(unittest.TestCase):
                     "--share",
                     "0.1",
                     "--platforms",
-                    "corona,lassen,tioga,tuolumne",
+                    "corona,dane,matrix,tioga,tuolumne",
                 ],
                 check=True,
                 capture_output=True,
                 text=True,
                 env=environment,
             )
-            self.assertIn("windows=9", completed.stdout.splitlines())
+            self.assertIn("windows=6", completed.stdout.splitlines())
             self.assertIn("routed=18", completed.stdout.splitlines())
             self.assertIn("waiting=2", completed.stdout.splitlines())
             self.assertIn(
                 "routed_sha256="
-                "3cca4e4cce7106a213753c9fff762c62a354b9e680b66195fef59465f51c4ae9",
+                "d6d2f7395217174fef5757171498d3876bcf04c279b5f908493d82dfc72689c5",
                 completed.stdout.splitlines(),
             )
             first_price = subprocess.run(
@@ -253,7 +252,9 @@ class MarketTests(unittest.TestCase):
                     "--hours",
                     "0.05",
                     "--per-platform",
-                    "corona,lassen",
+                    "corona,matrix",
+                    "--gpu-fraction",
+                    "0",
                 ],
                 check=True,
                 capture_output=True,
@@ -264,6 +265,7 @@ class MarketTests(unittest.TestCase):
             jobs = read_jobs(prepared_path)
             self.assertEqual(len(jobs), 10)
             self.assertEqual({job.source for job in jobs}, {"corona", "tioga"})
+            self.assertTrue(all(not job.requires for job in jobs))
 
 
 if __name__ == "__main__":

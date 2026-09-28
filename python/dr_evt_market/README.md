@@ -1,6 +1,6 @@
 # Federation market
 
-`dr_evt_market` runs a job trace through a federation of four real machine profiles.
+`dr_evt_market` runs a job trace through a federation of five real machine profiles.
 Each platform exposes a configurable share of its nodes, each market window auctions
 a prefix of the waiting queue, winners go to the platforms they won, and `dr_evt`
 runs the resulting streams.
@@ -13,13 +13,14 @@ whether a job fits, and the posted price determines its cost per node-hour.
 
 | Profile | Nodes | Price per node-hour | Hardware |
 |---|---:|---:|---|
-| Corona | 121 | 2.0 | CPU, GPU, AMD |
-| Lassen | 795 | 3.0 | CPU, GPU, NVIDIA |
-| Tioga | 32 | 6.0 | CPU, GPU, AMD |
-| Tuolumne | 1152 | 8.0 | CPU, GPU, AMD |
+| Corona | 121 | 1.5 | CPU, GPU |
+| Dane | 1544 | 0.18 | CPU |
+| Matrix | 30 | 1.6 | CPU, GPU |
+| Tioga | 32 | 2.7 | CPU, GPU |
+| Tuolumne | 1152 | 0.19 | CPU, GPU |
 
-These four profiles form the default federation. Dane is also available as a 1544
-node CPU profile at 1.0 per node-hour.
+These five profiles form the default federation. Hardware is intentionally limited to
+`cpu` and `gpu`: Dane is CPU-only, and every other profile accepts both.
 
 ## Jobs and bids
 
@@ -33,6 +34,12 @@ Unknown columns are ignored. A scalar `bid` is a maximum price per node-hour on 
 platform. If any `bid:<platform>` cell is filled, only those named platforms are bid
 on and the scalar cell is ignored.
 
+Prepared rows form one anonymous stream. `source` remains a label for analysis; it
+does not select a platform or determine a job's hardware. The traces do not identify
+GPU work, so each job requires `gpu` with probability 0.5 by default. The other jobs
+have no hardware requirement and can use a CPU. `--gpu-fraction` changes that
+probability, while `--requires` applies one requirement to the whole output file.
+
 For platform `p`, the public cost and reported value are:
 
 ```text
@@ -41,15 +48,15 @@ value(p) = bid_price(p)    * nodes * limit / 3600
 ```
 
 Trace preparation anchors each synthetic private price on the posted price of the
-trace's home machine. A seed, source, and pseudonymous user select a persistent
+trace's source profile. A seed, source, and pseudonymous user select a persistent
 persona; per-platform bids also apply a persistent user preference for each machine.
 
 | Persona | Share | Price per node-hour |
 |---|---:|---|
-| sticker | 45% | Home machine's posted price |
-| tier | 35% | Home price, 2x when urgent, or 4x when urgent and heavy |
-| value | 15% | Home price times a lognormal multiple with median 3.0 and sigma 0.5 |
-| whale | 5% | Ten times the home price |
+| sticker | 45% | Source profile's posted price |
+| tier | 35% | Source price, 2x when urgent, or 4x when urgent and heavy |
+| value | 15% | Source price times a lognormal multiple with median 3.0 and sigma 0.5 |
+| whale | 5% | Ten times the source price |
 
 An urgent tier job occurs with probability 20 percent. A tier user is a heavy premium
 user with probability 20 percent. By default, preparation uses historical run time as
@@ -127,7 +134,8 @@ Run a prepared jobs file:
 
 ```bash
 python -m dr_evt_market run --jobs jobs.csv --out results --share 0.1 \
-  --prefix 32 --window 60 --platforms corona,lassen,tioga,tuolumne
+  --prefix 32 --window 60 \
+  --platforms corona,dane,matrix,tioga,tuolumne
 ```
 
 `--mechanism` is `vcg` (the default), `firstprice` for pay what you bid, or
@@ -144,8 +152,8 @@ Prepare one merged interval from LC traces:
 ```bash
 python -m dr_evt_market prepare \
   --trace corona=/path/to/corona.csv --trace tioga=/path/to/tioga.csv \
-  --out jobs.csv --start 0 --hours 24 --seed 0 --requires gpu \
-  --per-platform corona,lassen,tioga,tuolumne --limit-from runtime
+  --out jobs.csv --start 0 --hours 24 --seed 0 --gpu-fraction 0.5 \
+  --per-platform corona,dane,matrix,tioga,tuolumne --limit-from runtime
 ```
 
 Use `--format simple` for the simple trace format. Each trace source must name a known

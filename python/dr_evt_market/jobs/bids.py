@@ -11,6 +11,15 @@ import hashlib
 import math
 
 
+def job_generator(seed: int, source: str, user: str, job_id: str):
+    """Return the deterministic random generator for one job."""
+    import numpy
+
+    key = f"{seed}:{source}:{user}:{job_id}"
+    digest = hashlib.sha256(key.encode()).digest()[:8]
+    return numpy.random.default_rng(int.from_bytes(digest, "big"))
+
+
 def persona_bid(
     seed: int,
     source: str,
@@ -18,6 +27,8 @@ def persona_bid(
     job_id: str,
     home_price: float,
     per_platform,
+    *,
+    job_rng=None,
 ) -> tuple[str, float | dict[str, float]]:
     """Return the deterministic persona and bid for one job."""
     import numpy
@@ -27,7 +38,8 @@ def persona_bid(
         return numpy.random.default_rng(int.from_bytes(digest, "big"))
 
     user_rng = generator(f"{seed}:{source}:{user}")
-    job_rng = generator(f"{seed}:{source}:{user}:{job_id}")
+    if job_rng is None:
+        job_rng = job_generator(seed, source, user, job_id)
     draw = user_rng.random()
     heavy = user_rng.random() < 0.2
     if draw < 0.45:

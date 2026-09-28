@@ -52,7 +52,7 @@ class RecordWindowsTests(unittest.TestCase):
             platforms = federation(Path(directory) / "recorded", share=0.1)
             windows = record_windows(jobs, platforms)
             result = run(jobs, federation(Path(directory) / "run", share=0.1), Vcg())
-        self.assertEqual(len(windows), 9)
+        self.assertEqual(len(windows), 6)
         self.assertEqual(
             [job.job_id for job in windows[0][0]],
             ["j000001", "j000002", "j000003", "j000004", "j000005"],
@@ -107,7 +107,7 @@ class TrainingTests(unittest.TestCase):
                 "2",
             )
             self.assertEqual(trained.returncode, 0, trained.stderr)
-            self.assertIn("windows=9", trained.stdout.splitlines())
+            self.assertIn("windows=6", trained.stdout.splitlines())
             ran = _command(
                 "run",
                 "--jobs",

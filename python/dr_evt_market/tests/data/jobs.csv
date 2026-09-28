@@ -1,21 +1,21 @@
-job_id,job_submit_time,num_nodes,time_limit,bid,bid:corona,bid:lassen,bid:tioga,bid:tuolumne,requires,runtime,requested,source,user,persona
-j000001,0,8,90,2.2,,,,,gpu,90,120,tioga,1,tier
-j000002,0,7,150,2.4,,,,,gpu,150,180,tuo,1,value
-j000003,0,6,55,3.2,,,,,gpu,55,60,corona,2,tier
-j000004,0,20,100,,,3.2,,8.5,gpu nvidia,100,120,tioga,3,tier
-j000005,0,3,80,2.6,,,,,gpu amd,80,90,tuo,2,value
-j000006,30,10,70,2.0,,,,,gpu,70,90,corona,4,sticker
-j000007,60,12,100,6.5,,,,,gpu,100,120,tioga,5,value
-j000008,60,3,50,8.0,,,,,gpu amd,50,60,tuo,6,tier
-j000009,90,30,160,3.5,,,,,gpu nvidia,160,180,corona,7,tier
-j000010,90,2,40,,20.0,12.0,10.0,9.0,gpu,40,45,tioga,8,whale
-j000011,120,11,55,4.0,,,,,gpu,55,60,tuo,9,tier
-j000012,120,3,75,2.5,,,,,gpu amd,75,90,corona,10,tier
-j000013,150,9,100,7.0,,,,,gpu,100,120,tioga,11,value
-j000014,180,120,80,6.0,,,,,gpu,80,90,tuo,12,value
-j000015,180,4,50,,1.5,,,,gpu,50,60,corona,13,sticker
-j000016,210,14,105,4.0,,,,,gpu,105,120,tioga,14,tier
-j000017,240,3,50,8.5,,,,,gpu amd,50,60,tuo,15,tier
-j000018,240,18,75,4.0,,,,,gpu nvidia,75,90,corona,16,tier
-j000019,270,6,40,6.5,,,,,gpu,40,45,tioga,17,value
-j000020,300,5,25,8.5,,,,,gpu,25,30,tuo,18,value
+job_id,job_submit_time,num_nodes,time_limit,bid,bid:corona,bid:dane,bid:matrix,bid:tioga,bid:tuolumne,requires,runtime,requested,source,user,persona
+j000001,0,100,180,0.30,,,,,,,180,240,corona,1,tier
+j000002,0,80,150,0.28,,,,,,,150,180,dane,1,value
+j000003,0,70,55,0.26,,,,,,,55,60,matrix,2,tier
+j000004,0,110,180,,,,,,0.50,gpu,180,240,tioga,3,tier
+j000005,0,3,50,0.19,,,,,,gpu,50,60,tuolumne,2,sticker
+j000006,60,10,120,3.00,,,,,,gpu,120,150,corona,4,tier
+j000007,60,3,100,3.00,,,,,,gpu,100,120,dane,5,value
+j000008,60,3,110,3.20,,,,,,gpu,110,120,matrix,6,tier
+j000009,60,3,120,3.40,,,,,,gpu,120,150,tioga,7,tier
+j000010,90,3,40,,15.0,1.8,16.0,27.0,1.9,gpu,40,45,tuolumne,8,whale
+j000011,120,50,55,0.25,,,,,,,55,60,corona,9,tier
+j000012,120,12,75,1.70,,,,,,gpu,75,90,dane,10,tier
+j000013,150,3,100,0.20,,,,,,,100,120,matrix,11,value
+j000014,180,155,80,3.00,,,,,,,80,90,tioga,12,value
+j000015,180,4,50,,1.40,,,,,gpu,50,60,tuolumne,13,sticker
+j000016,210,14,105,2.00,,,,,,gpu,105,120,corona,14,tier
+j000017,240,3,50,0.20,,,,,,,50,60,dane,15,tier
+j000018,240,3,75,2.00,,,,,,gpu,75,90,matrix,16,tier
+j000019,270,3,40,3.00,,,,,,gpu,40,45,tioga,17,value
+j000020,300,5,25,0.30,,,,,,,25,30,tuolumne,18,value

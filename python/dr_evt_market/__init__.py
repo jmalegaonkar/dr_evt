@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""A federation market over DR_EVT: four platforms, a job stream, an auction."""
+"""A federation market over DR_EVT: five platforms, a job stream, an auction."""
 
 from .jobs import Job, prepare, read_jobs, write_jobs
 from .market import MarketError, Result, RoutedJob, Waiting, run, write_outputs
@@ -26,7 +26,7 @@ from .platform import (
     Corona,
     Dane,
     DEFAULT_FEDERATION,
-    Lassen,
+    Matrix,
     Platform,
     PLATFORMS,
     Tioga,
@@ -41,7 +41,7 @@ __all__ = [
     "Decision",
     "FirstPrice",
     "Job",
-    "Lassen",
+    "Matrix",
     "MECHANISMS",
     "MarketError",
     "Mechanism",

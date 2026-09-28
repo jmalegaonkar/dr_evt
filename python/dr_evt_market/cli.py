@@ -54,7 +54,8 @@ def _parser():
     prepare_parser.add_argument("--start", type=float)
     prepare_parser.add_argument("--hours", type=float)
     prepare_parser.add_argument("--seed", type=int, default=0)
-    prepare_parser.add_argument("--requires", default="gpu")
+    prepare_parser.add_argument("--gpu-fraction", type=float, default=0.5)
+    prepare_parser.add_argument("--requires")
     prepare_parser.add_argument("--per-platform")
     prepare_parser.add_argument(
         "--limit-from", choices=("runtime", "request"), default="runtime"
@@ -145,6 +146,7 @@ def _prepare(args):
         start=args.start,
         hours=args.hours,
         seed=args.seed,
+        gpu_fraction=args.gpu_fraction,
         requires=args.requires,
         per_platform=per_platform,
         limit_from=args.limit_from,
