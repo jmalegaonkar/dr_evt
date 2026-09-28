@@ -9,7 +9,15 @@
 
 from .jobs import Job, prepare, read_jobs, write_jobs
 from .market import MarketError, Rejected, Result, RoutedJob, run, write_outputs
-from .mechanism import Decision, FirstPrice, MECHANISMS, Mechanism, Vcg, candidates
+from .mechanism import (
+    Decision,
+    FirstPrice,
+    MECHANISMS,
+    Mechanism,
+    RegretFormer,
+    Vcg,
+    candidates,
+)
 from .platform import (
     Corona,
     Dane,
@@ -34,6 +42,7 @@ __all__ = [
     "MarketError",
     "Mechanism",
     "Platform",
+    "RegretFormer",
     "Rejected",
     "Result",
     "RoutedJob",

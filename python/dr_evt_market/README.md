@@ -68,6 +68,16 @@ VCG lets users keep the savings between their values and the charges above poste
 cost. Pay what you bid assigns offers greedily and gives that surplus to the center.
 Both mechanisms report welfare and revenue through the same market outputs.
 
+`RegretFormer` is a learned mechanism: the network of Ivanov et al. (NeurIPS 2022) over
+a grid of jobs by platforms. For each job it gives a probability for every candidate
+platform and for waiting, and a payment fraction. The market takes the most probable
+cells first and places a job on the first of its platforms that still has the nodes.
+Waiting only lowers a job's place in that order: a job stays in the queue only when
+none of its platforms has room left, and is never turned away. A winner pays its cost
+plus its payment fraction of the difference between its value and that cost. It needs
+`torch`; `RegretFormer(path)` loads a saved network and `RegretFormer(seed=0)` builds
+an untrained one.
+
 At each fixed window, the market advances every platform, admits arrivals, auctions
 the first `prefix` queued jobs, submits winners, and advances again. Its guarantee is
 that every accepted winner starts in its market window. Per-job begin and end are
@@ -89,6 +99,9 @@ Run a prepared jobs file:
 python -m dr_evt_market run --jobs jobs.csv --out results --share 0.1 \
   --prefix 32 --window 60 --platforms corona,lassen,tioga,tuolumne
 ```
+
+`--mechanism` is `vcg` (the default), `firstprice` for pay what you bid, or
+`regretformer` with `--checkpoint PATH` for a saved network.
 
 Prepare one merged interval from LC traces:
 

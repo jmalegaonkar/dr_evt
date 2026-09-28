@@ -30,6 +30,7 @@ def _parser():
     run_parser.add_argument("--prefix", type=int, default=32)
     run_parser.add_argument("--window", type=int, default=60)
     run_parser.add_argument("--mechanism", choices=MECHANISMS, default="vcg")
+    run_parser.add_argument("--checkpoint", type=Path)
     run_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
 
     prepare_parser = commands.add_parser("prepare", help="prepare trace jobs")
@@ -55,14 +56,23 @@ def _names(value):
     return names
 
 
+def _mechanism(args):
+    if args.mechanism != "regretformer":
+        return MECHANISMS[args.mechanism]()
+    if args.checkpoint is None:
+        raise ValueError("--mechanism regretformer needs --checkpoint")
+    return MECHANISMS[args.mechanism](args.checkpoint)
+
+
 def _run(args):
+    mechanism = _mechanism(args)
     platforms = federation(
         args.out / "platforms", args.share, names=_names(args.platforms)
     )
     result = run(
         read_jobs(args.jobs),
         platforms,
-        MECHANISMS[args.mechanism](),
+        mechanism,
         window_s=args.window,
         prefix=args.prefix,
     )
@@ -109,7 +119,7 @@ def main(argv=None) -> int:
     args = _parser().parse_args(argv)
     try:
         _run(args) if args.command == "run" else _prepare(args)
-    except ValueError as error:
+    except (ImportError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     return 0

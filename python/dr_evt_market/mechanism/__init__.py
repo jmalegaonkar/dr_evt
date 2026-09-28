@@ -9,15 +9,17 @@
 
 from .base import Decision, Mechanism, candidates
 from .firstprice import FirstPrice
+from .regretformer import RegretFormer
 from .vcg import Vcg
 
-MECHANISMS = {"vcg": Vcg, "firstprice": FirstPrice}
+MECHANISMS = {"vcg": Vcg, "firstprice": FirstPrice, "regretformer": RegretFormer}
 
 __all__ = [
     "Decision",
     "FirstPrice",
     "MECHANISMS",
     "Mechanism",
+    "RegretFormer",
     "Vcg",
     "candidates",
 ]
