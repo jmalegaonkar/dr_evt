@@ -79,7 +79,9 @@ plus its payment fraction of the difference between its value and that cost. It 
 an untrained one.
 
 At each fixed window, the market advances every platform, admits arrivals, auctions
-the first `prefix` queued jobs, submits winners, and advances again. Its guarantee is
+the first `prefix` queued jobs, submits winners, and advances again. A mechanism must
+place every batch job that still fits the nodes left over, so a job waits only when no
+platform has room for it; anything else raises `MarketError`. The market's guarantee is
 that every accepted winner starts in its market window. Per-job begin and end are
 recorded by the market from that guarantee, not read from `dr_evt`, and streamed jobs
 run their limit.

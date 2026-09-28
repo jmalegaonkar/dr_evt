@@ -52,7 +52,7 @@ class _BadMechanism(Mechanism):
 
 
 class _Decline(Mechanism):
-    """Place nothing, as a mechanism with a reserve price may."""
+    """Place nothing, which the market forbids while a job fits."""
 
     name = "decline"
 
@@ -133,23 +133,13 @@ class MarketTests(unittest.TestCase):
                 with self.assertRaises(MarketError):
                     run(jobs, platforms, _BadMechanism(mode))
 
-    def test_declined_queue_keeps_later_arrivals(self) -> None:
-        """An idle window that places nothing does not lose jobs yet to arrive."""
-        jobs = [
-            Job(f"j{index}", 600 * index, 1, 60, 3.0, {"gpu"}) for index in range(3)
-        ]
+    def test_leaving_a_job_waiting_on_free_nodes_raises(self) -> None:
+        """A mechanism must place every batch job that fits the nodes left over."""
+        jobs = [Job("fits", 0, 1, 60, 3.0, {"gpu"})]
         with tempfile.TemporaryDirectory() as directory:
             platforms = federation(Path(directory) / "platforms", share=0.1)
-            result = run(jobs, platforms, _Decline())
-        self.assertEqual(result.routed, [])
-        self.assertEqual(
-            [(row.job_id, row.reason, row.time_s) for row in result.rejected],
-            [
-                ("j0", "unplaceable", 1200),
-                ("j1", "unplaceable", 1200),
-                ("j2", "unplaceable", 1200),
-            ],
-        )
+            with self.assertRaisesRegex(MarketError, "fits: left waiting"):
+                run(jobs, platforms, _Decline())
 
     def test_first_price_revenue_is_routed_value(self) -> None:
         """Pay what you bid gives the routed surplus to the center."""

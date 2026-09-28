@@ -12,6 +12,7 @@ import random
 import tempfile
 import unittest
 from dataclasses import dataclass, replace
+from unittest import mock
 
 from dr_evt_market import Decision, FirstPrice, Job, Vcg, candidates, federation
 
@@ -233,6 +234,19 @@ class AuctionTests(unittest.TestCase):
         crowded = Vcg().decide(jobs, platforms, {"only": 3})
         self.assertEqual(
             [item.job_id for item in crowded], ["tier", "sticker0", "sticker1"]
+        )
+
+    def test_a_job_the_solve_misses_still_runs_at_cost(self) -> None:
+        """A job left out by the solver takes its best leftover platform at cost."""
+        platforms = {
+            "cheap": _Platform("cheap", 4, 1.0, frozenset({"gpu"})),
+            "dear": _Platform("dear", 4, 2.0, frozenset({"gpu"})),
+        }
+        job = Job("missed", 0, 2, 360, 3.0, {"gpu"})
+        with mock.patch("dr_evt_market.mechanism.vcg._solve", return_value=({}, 0.0)):
+            decisions = Vcg().decide([job], platforms, {"cheap": 4, "dear": 4})
+        self.assertEqual(
+            decisions, [Decision("missed", "cheap", platforms["cheap"].cost(job))]
         )
 
     def test_first_price_is_feasible_and_bounded_by_vcg(self) -> None:

@@ -94,6 +94,10 @@ def _check_decisions(batch, platforms, free_nodes, decisions: list[Decision]):
         if used[decision.platform] > free_nodes[decision.platform]:
             raise MarketError(f"{decision.job_id}: platform capacity exceeded")
         checked[decision.job_id] = (job, decision, cost, value)
+    left = {name: free_nodes[name] - used[name] for name in platforms}
+    for job in batch:
+        if job.job_id not in checked and candidates(job, platforms, left):
+            raise MarketError(f"{job.job_id}: left waiting on free nodes")
     return [checked[job.job_id] for job in batch if job.job_id in checked]
 
 
@@ -187,19 +191,6 @@ def run(
             )
         winner_ids = {decision.job_id for decision in decisions}
         queue = [job for job in queue if job.job_id not in winner_ids]
-
-        if (
-            not winners
-            and queue
-            and arrival == len(arrivals)
-            and all(
-                platform.free_nodes() == platform.exposed_nodes
-                for platform in platforms.values()
-            )
-        ):
-            rejected.extend(Rejected(job.job_id, "unplaceable", t) for job in queue)
-            queue.clear()
-            break
         t += window_s
         window += 1
 

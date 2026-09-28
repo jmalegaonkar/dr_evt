@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from .base import Decision, Mechanism, candidates
 
 _TIE_BREAK = 1.0e-9
-_TOLERANCE = 1.0e-9
 
 
 @dataclass(frozen=True)
@@ -80,11 +79,12 @@ def _solve(jobs, platforms, free_nodes, time_limit_s, excluded=None):
     return chosen, sum(variable.net for variable in chosen.values())
 
 
-def _posted_price_offer(job, platforms, free_nodes):
-    for name, (cost, _) in candidates(job, platforms, free_nodes).items():
-        if job.price(name) <= platforms[name].price_per_node_hour + _TOLERANCE:
-            return name, cost
-    return None
+def _leftover_offer(job, platforms, free_nodes):
+    offers = candidates(job, platforms, free_nodes)
+    if not offers:
+        return None
+    name = max(offers, key=lambda name: offers[name][1] - offers[name][0])
+    return name, offers[name][0]
 
 
 class Vcg(Mechanism):
@@ -107,10 +107,11 @@ class Vcg(Mechanism):
         for job_index, job in enumerate(jobs):
             variable = chosen.get(job_index)
             if variable is None:
-                # A job bidding exactly the posted price adds no welfare, so the
-                # solve may leave it out. It takes nodes no winner uses and
-                # displaces nobody, so its pivot is zero and it pays its cost.
-                offer = _posted_price_offer(job, platforms, left)
+                # The solve leaves out a job that fits the nodes left over only
+                # when it adds no welfare (it bids the posted price) or, within
+                # the solver's tolerance, almost none. It displaces nobody, so
+                # its pivot is zero and it pays its cost.
+                offer = _leftover_offer(job, platforms, left)
                 if offer is not None:
                     left[offer[0]] -= job.num_nodes
                     decisions.append(Decision(job.job_id, *offer))
