@@ -17,7 +17,7 @@ class Corona(Platform):
 
     name = "corona"
     total_nodes = 121
-    price_per_node_hour = 2.0
+    price_per_node_hour = 1.5
     hardware = frozenset({"cpu", "gpu", "amd"})
 
 
@@ -26,7 +26,7 @@ class Dane(Platform):
 
     name = "dane"
     total_nodes = 1544
-    price_per_node_hour = 1.0
+    price_per_node_hour = .18
     hardware = frozenset({"cpu"})
 
 
@@ -44,7 +44,7 @@ class Tioga(Platform):
 
     name = "tioga"
     total_nodes = 32
-    price_per_node_hour = 6.0
+    price_per_node_hour = 2.7
     hardware = frozenset({"cpu", "gpu", "amd"})
 
 
@@ -53,9 +53,15 @@ class Tuolumne(Platform):
 
     name = "tuolumne"
     total_nodes = 1152
-    price_per_node_hour = 8.0
+    price_per_node_hour = .19
     hardware = frozenset({"cpu", "gpu", "amd"})
 
+class Matrix(Platform):
+    """The Matrix NVIDIA GPU platform profile."""
+    name = "matrix"
+    total_nodes = 30
+    price_per_node_hour = 1.6
+    hardware = frozenset({"cpu", "gpu", "nvidia"})
 
 PLATFORMS = (Corona, Dane, Lassen, Tioga, Tuolumne)
 DEFAULT_FEDERATION = ("corona", "lassen", "tioga", "tuolumne")
