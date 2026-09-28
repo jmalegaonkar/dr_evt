@@ -18,7 +18,9 @@ from .mechanism import (
     Vcg,
     candidates,
     grid_regret,
+    record_windows,
     refined_regret,
+    train_regretformer,
 )
 from .platform import (
     Corona,
@@ -57,8 +59,10 @@ __all__ = [
     "grid_regret",
     "prepare",
     "read_jobs",
+    "record_windows",
     "refined_regret",
     "run",
+    "train_regretformer",
     "write_outputs",
     "write_jobs",
 ]

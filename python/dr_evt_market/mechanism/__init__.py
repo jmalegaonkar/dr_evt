@@ -11,6 +11,7 @@ from .base import Decision, Mechanism, candidates
 from .firstprice import FirstPrice
 from .regret import grid_regret, refined_regret
 from .regretformer import RegretFormer
+from .training import record_windows, train_regretformer
 from .vcg import Vcg
 
 MECHANISMS = {"vcg": Vcg, "firstprice": FirstPrice, "regretformer": RegretFormer}
@@ -24,5 +25,7 @@ __all__ = [
     "Vcg",
     "candidates",
     "grid_regret",
+    "record_windows",
     "refined_regret",
+    "train_regretformer",
 ]

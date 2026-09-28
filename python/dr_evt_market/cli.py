@@ -5,15 +5,16 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""The command line: run a market, prepare a trace."""
+"""The command line: run a market, train RegretFormer, prepare a trace."""
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
 from .jobs import prepare, read_jobs, write_jobs
 from .market import run, write_outputs
-from .mechanism import MECHANISMS
+from .mechanism import MECHANISMS, record_windows, train_regretformer
 from .platform import DEFAULT_FEDERATION, PLATFORMS, federation
 
 _PROFILES = {profile.name: profile for profile in PLATFORMS}
@@ -32,6 +33,19 @@ def _parser():
     run_parser.add_argument("--mechanism", choices=MECHANISMS, default="vcg")
     run_parser.add_argument("--checkpoint", type=Path)
     run_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
+
+    train_parser = commands.add_parser("train", help="train RegretFormer")
+    train_parser.add_argument("--jobs", required=True, type=Path)
+    train_parser.add_argument("--out", required=True, type=Path)
+    train_parser.add_argument("--share", type=float, default=1.0)
+    train_parser.add_argument("--prefix", type=int, default=32)
+    train_parser.add_argument("--window", type=int, default=60)
+    train_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
+    train_parser.add_argument(
+        "--objective", choices=("revenue", "welfare"), default="revenue"
+    )
+    train_parser.add_argument("--steps", type=int, default=2000)
+    train_parser.add_argument("--seed", type=int, default=0)
 
     prepare_parser = commands.add_parser("prepare", help="prepare trace jobs")
     prepare_parser.add_argument("--trace", action="append", required=True)
@@ -84,6 +98,32 @@ def _run(args):
     print(f"routed_sha256={paths['sha256']}")
 
 
+def _train(args):
+    with tempfile.TemporaryDirectory() as directory:
+        platforms = federation(directory, args.share, names=_names(args.platforms))
+        windows = record_windows(
+            read_jobs(args.jobs), platforms, window_s=args.window, prefix=args.prefix
+        )
+        mechanism, history = train_regretformer(
+            windows,
+            platforms,
+            objective=args.objective,
+            steps=args.steps,
+            seed=args.seed,
+        )
+    mechanism.save(
+        args.out,
+        objective=args.objective,
+        steps=args.steps,
+        windows=len(windows),
+        share=args.share,
+    )
+    print(f"windows={len(windows)}")
+    for key in ("objective", "regret", "multiplier"):
+        last = history[key][-100:]
+        print(f"{key}={sum(last) / len(last):.6g}")
+
+
 def _prepare(args):
     traces = {}
     home_prices = {}
@@ -118,7 +158,7 @@ def main(argv=None) -> int:
     """Parse arguments, run the selected command, and return its status."""
     args = _parser().parse_args(argv)
     try:
-        _run(args) if args.command == "run" else _prepare(args)
+        {"run": _run, "train": _train, "prepare": _prepare}[args.command](args)
     except (ImportError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

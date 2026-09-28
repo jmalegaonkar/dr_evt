@@ -88,6 +88,18 @@ reads zero; pay what you bid reads up to each winner's surplus over the posted p
 learned mechanism, and reports beside it the gradient-only estimate that RegretFormer's
 own protocol gives.
 
+`record_windows(jobs, platforms)` runs the market, under VCG unless another mechanism
+is given, and returns every window's batch and free nodes. `train_regretformer(windows,
+platforms)` trains the network on them with RegretFormer's recipe: it maximizes the
+center's premiums (or welfare, with `objective="welfare"`) less a multiplier times the
+regret, and raises the multiplier while the regret exceeds a budget that shrinks from 1
+to 0.1 percent of the jobs' available surplus. Misreports come from the item-wise grid,
+not gradient ascent. A penalty keeps the relaxed allocation within the free nodes and
+stops it from holding back jobs that fit, since the market places those anyway. The
+regret that training reports is measured on the relaxed network and can be far below
+that of the mechanism the market applies: judge a trained network by `refined_regret`
+on windows it was not trained on.
+
 At each fixed window, the market advances every platform, admits arrivals, auctions
 the first `prefix` queued jobs, submits winners, and advances again. A mechanism must
 place every batch job that still fits the nodes left over, so a job waits only when no
@@ -119,7 +131,13 @@ python -m dr_evt_market run --jobs jobs.csv --out results --share 0.1 \
 ```
 
 `--mechanism` is `vcg` (the default), `firstprice` for pay what you bid, or
-`regretformer` with `--checkpoint PATH` for a saved network.
+`regretformer` with `--checkpoint PATH` for a saved network. To train one, record the
+windows of a VCG run on the same jobs and federation and train on them:
+
+```bash
+python -m dr_evt_market train --jobs jobs.csv --out network.pt --share 0.2 \
+  --objective revenue --steps 2000
+```
 
 Prepare one merged interval from LC traces:
 

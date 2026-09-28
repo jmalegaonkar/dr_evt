@@ -36,6 +36,17 @@ class Window:
         tensors = (getattr(self, field.name) for field in fields(self))
         return Window(*(tensor.expand(count, *tensor.shape[1:]) for tensor in tensors))
 
+    def take(self, index) -> "Window":
+        """Return the windows at the given batch positions."""
+        index = torch.as_tensor(index)
+        return Window(*(getattr(self, field.name)[index] for field in fields(self)))
+
+    def scale(self) -> torch.Tensor:
+        """Return each window's mean posted cost over the cells that fit, [B]."""
+        public = self.fits & self.jobs.unsqueeze(-1)
+        total = (self.cost() * public).sum((1, 2))
+        return (total / public.sum((1, 2)).clamp(min=1)).clamp(min=_TOLERANCE)
+
     def cost(self) -> torch.Tensor:
         """Return the posted cost of every job on every platform."""
         return self.posted.unsqueeze(1) * (self.nodes * self.hours).unsqueeze(-1)
@@ -55,9 +66,7 @@ class Window:
     def features(self, prices: torch.Tensor):
         """Return the network's input channels and the candidate cells."""
         cost = self.cost()
-        public = self.fits & self.jobs.unsqueeze(-1)
-        scale = (cost * public).sum((1, 2)) / public.sum((1, 2)).clamp(min=1)
-        scale = scale.clamp(min=_TOLERANCE).view(-1, 1, 1)
+        scale = self.scale().view(-1, 1, 1)
         candidate = self.candidates(prices)
         channels = torch.stack(
             [
