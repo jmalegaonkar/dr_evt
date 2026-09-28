@@ -88,10 +88,16 @@ run their limit.
 
 ## Outputs
 
-`run` writes `routed.csv`, `rejected.csv`, and `summary.json`. The routed ledger holds
+`run` writes `routed.csv`, `waiting.csv`, and `summary.json`. The routed ledger holds
 the chosen platform, cost, value, premium, charge, and timing. The summary contains
 the resolved configuration, platform statistics, welfare, revenue, counts, and the
 SHA-256 digest of `routed.csv`.
+
+The market turns no job away. A job that no platform could run at its price, even with
+every node free, waits outside the auction: no platform has its `hardware`, it is
+`oversize` for every share, or it is `unaffordable` wherever it fits. At fixed prices
+and shares it waits until the run ends, and `waiting.csv` lists it with that reason
+and its submission time.
 
 ## Command line
 

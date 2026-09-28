@@ -29,7 +29,7 @@ _ROUTED_FIELDS = (
     "begin_s",
     "end_s",
 )
-_REJECTED_FIELDS = ("job_id", "reason", "time_s")
+_WAITING_FIELDS = ("job_id", "reason", "submit_s")
 
 
 @dataclass(frozen=True)
@@ -50,20 +50,20 @@ class RoutedJob:
 
 
 @dataclass(frozen=True)
-class Rejected:
-    """One job rejected by intake or the market loop."""
+class Waiting:
+    """One job still waiting when the run ends, and what keeps it from running."""
 
     job_id: str
     reason: str
-    time_s: int
+    submit_s: int
 
 
 @dataclass
 class Result:
-    """The routes, rejections, statistics and resolved configuration."""
+    """The routes, the jobs still waiting, statistics and resolved configuration."""
 
     routed: list[RoutedJob]
-    rejected: list[Rejected]
+    waiting: list[Waiting]
     statistics: dict[str, dict[str, float]]
     configuration: dict
 
@@ -118,6 +118,16 @@ def _configuration(platforms, mechanism, window_s, prefix):
     }
 
 
+def _blocked_by(job, platforms, full_nodes):
+    if not any(job.requires <= platform.hardware for platform in platforms.values()):
+        return "hardware"
+    if not any(platform.fits(job) for platform in platforms.values()):
+        return "oversize"
+    if not candidates(job, platforms, full_nodes):
+        return "unaffordable"
+    return None
+
+
 def run(
     jobs, platforms, mechanism: Mechanism, *, window_s: int = 60, prefix: int = 32
 ) -> Result:
@@ -135,14 +145,16 @@ def run(
     ]
     full = {name: platform.exposed_nodes for name, platform in platforms.items()}
     arrivals = []
-    rejected = []
+    waiting = []
     for job in ordered:
-        if not any(platform.fits(job) for platform in platforms.values()):
-            rejected.append(Rejected(job.job_id, "oversize", job.submit_s))
-        elif not candidates(job, platforms, full):
-            rejected.append(Rejected(job.job_id, "unaffordable", job.submit_s))
-        else:
+        # Nothing is turned away. A job that no platform could run at its price,
+        # even idle, waits outside the auction: at fixed prices and shares, until
+        # the run ends.
+        reason = _blocked_by(job, platforms, full)
+        if reason is None:
             arrivals.append(job)
+        else:
+            waiting.append(Waiting(job.job_id, reason, job.submit_s))
 
     routed = []
     queue = []
@@ -201,7 +213,7 @@ def run(
     statistics = {name: platform.statistics() for name, platform in platforms.items()}
     return Result(
         routed,
-        rejected,
+        waiting,
         statistics,
         _configuration(platforms, mechanism, window_s, prefix),
     )
@@ -219,10 +231,10 @@ def write_outputs(result: Result, out_dir) -> dict[str, str]:
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
     routed_path = root / "routed.csv"
-    rejected_path = root / "rejected.csv"
+    waiting_path = root / "waiting.csv"
     summary_path = root / "summary.json"
     _write_csv(routed_path, _ROUTED_FIELDS, result.routed)
-    _write_csv(rejected_path, _REJECTED_FIELDS, result.rejected)
+    _write_csv(waiting_path, _WAITING_FIELDS, result.waiting)
     digest = hashlib.sha256(routed_path.read_bytes()).hexdigest()
     summary = {
         "configuration": result.configuration,
@@ -230,7 +242,7 @@ def write_outputs(result: Result, out_dir) -> dict[str, str]:
         "welfare": sum(row.value - row.cost for row in result.routed),
         "revenue": sum(row.charge for row in result.routed),
         "routed": len(result.routed),
-        "rejected": len(result.rejected),
+        "waiting": len(result.waiting),
         "sha256": digest,
     }
     summary_path.write_text(
@@ -238,7 +250,7 @@ def write_outputs(result: Result, out_dir) -> dict[str, str]:
     )
     return {
         "routed": str(routed_path),
-        "rejected": str(rejected_path),
+        "waiting": str(waiting_path),
         "summary": str(summary_path),
         "sha256": digest,
     }
@@ -246,9 +258,9 @@ def write_outputs(result: Result, out_dir) -> dict[str, str]:
 
 __all__ = [
     "MarketError",
-    "Rejected",
     "Result",
     "RoutedJob",
+    "Waiting",
     "run",
     "write_outputs",
 ]

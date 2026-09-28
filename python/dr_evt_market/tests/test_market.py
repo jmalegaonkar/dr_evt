@@ -70,14 +70,14 @@ class MarketTests(unittest.TestCase):
         result = run(jobs, platforms, Vcg(), window_s=60, prefix=prefix)
         return jobs, result
 
-    def test_fixture_routes_at_windows_and_rejects_two(self) -> None:
-        """The fixture routes eighteen jobs and rejects only intake failures."""
+    def test_fixture_routes_at_windows_and_keeps_two_waiting(self) -> None:
+        """The fixture routes eighteen jobs; the two that cannot run still wait."""
         with tempfile.TemporaryDirectory() as directory:
             jobs, result = self._fixture(Path(directory))
         by_id = {job.job_id: job for job in jobs}
         self.assertEqual(len(result.routed), 18)
         self.assertEqual(
-            [(row.job_id, row.reason, row.time_s) for row in result.rejected],
+            [(row.job_id, row.reason, row.submit_s) for row in result.waiting],
             [
                 ("j000014", "oversize", 180),
                 ("j000015", "unaffordable", 180),
@@ -133,6 +133,27 @@ class MarketTests(unittest.TestCase):
                 with self.assertRaises(MarketError):
                     run(jobs, platforms, _BadMechanism(mode))
 
+    def test_waiting_names_what_keeps_a_job_from_running(self) -> None:
+        """Without Lassen, NVIDIA jobs wait for hardware, not for being oversize."""
+        jobs = read_jobs(_DATA / "jobs.csv")
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(
+                Path(directory), share=0.1, names=("corona", "tioga", "tuolumne")
+            )
+            result = run(jobs, platforms, Vcg())
+        self.assertEqual(
+            [(row.job_id, row.reason) for row in result.waiting],
+            [
+                ("j000004", "hardware"),
+                ("j000009", "hardware"),
+                ("j000014", "oversize"),
+                ("j000015", "unaffordable"),
+                ("j000016", "unaffordable"),
+                ("j000018", "hardware"),
+            ],
+        )
+        self.assertEqual(len(result.routed) + len(result.waiting), len(jobs))
+
     def test_leaving_a_job_waiting_on_free_nodes_raises(self) -> None:
         """A mechanism must place every batch job that fits the nodes left over."""
         jobs = [Job("fits", 0, 1, 60, 3.0, {"gpu"})]
@@ -186,7 +207,7 @@ class MarketTests(unittest.TestCase):
             )
             self.assertIn("windows=9", completed.stdout.splitlines())
             self.assertIn("routed=18", completed.stdout.splitlines())
-            self.assertIn("rejected=2", completed.stdout.splitlines())
+            self.assertIn("waiting=2", completed.stdout.splitlines())
             self.assertIn(
                 "routed_sha256="
                 "3cca4e4cce7106a213753c9fff762c62a354b9e680b66195fef59465f51c4ae9",

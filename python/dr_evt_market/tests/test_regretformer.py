@@ -68,7 +68,7 @@ class RegretFormerTests(unittest.TestCase):
     """Run the network through the market."""
 
     def test_untrained_networks_route_every_admitted_job(self) -> None:
-        """Whatever its weights, the network turns away no job the intake admits."""
+        """Whatever its weights, the network routes every job that can run."""
         jobs = read_jobs(_DATA / "jobs.csv")
         for seed in range(6):
             with self.subTest(seed=seed), tempfile.TemporaryDirectory() as directory:
@@ -76,7 +76,7 @@ class RegretFormerTests(unittest.TestCase):
                 result = run(jobs, platforms, RegretFormer(seed=seed))
                 self.assertEqual(len(result.routed), 18)
                 self.assertEqual(
-                    {row.reason for row in result.rejected},
+                    {row.reason for row in result.waiting},
                     {"oversize", "unaffordable"},
                 )
                 for row in result.routed:
@@ -141,7 +141,7 @@ class RegretFormerTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             summary = json.loads((root / "run" / "summary.json").read_text())
         self.assertEqual(summary["configuration"]["mechanism"], "regretformer")
-        self.assertEqual(summary["routed"] + summary["rejected"], 20)
+        self.assertEqual(summary["routed"] + summary["waiting"], 20)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@
 """A federation market over DR_EVT: four platforms, a job stream, an auction."""
 
 from .jobs import Job, prepare, read_jobs, write_jobs
-from .market import MarketError, Rejected, Result, RoutedJob, run, write_outputs
+from .market import MarketError, Result, RoutedJob, Waiting, run, write_outputs
 from .mechanism import (
     Decision,
     FirstPrice,
@@ -43,12 +43,12 @@ __all__ = [
     "Mechanism",
     "Platform",
     "RegretFormer",
-    "Rejected",
     "Result",
     "RoutedJob",
     "Tioga",
     "Tuolumne",
     "Vcg",
+    "Waiting",
     "PLATFORMS",
     "candidates",
     "federation",

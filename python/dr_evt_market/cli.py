@@ -80,7 +80,7 @@ def _run(args):
     windows = max((row.window for row in result.routed), default=-1) + 1
     print(f"windows={windows}")
     print(f"routed={len(result.routed)}")
-    print(f"rejected={len(result.rejected)}")
+    print(f"waiting={len(result.waiting)}")
     print(f"routed_sha256={paths['sha256']}")
 
 
