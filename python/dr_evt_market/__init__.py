@@ -17,6 +17,8 @@ from .mechanism import (
     RegretFormer,
     Vcg,
     candidates,
+    grid_regret,
+    refined_regret,
 )
 from .platform import (
     Corona,
@@ -52,8 +54,10 @@ __all__ = [
     "PLATFORMS",
     "candidates",
     "federation",
+    "grid_regret",
     "prepare",
     "read_jobs",
+    "refined_regret",
     "run",
     "write_outputs",
     "write_jobs",

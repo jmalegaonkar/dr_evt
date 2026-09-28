@@ -78,6 +78,16 @@ plus its payment fraction of the difference between its value and that cost. It 
 `torch`; `RegretFormer(path)` loads a saved network and `RegretFormer(seed=0)` builds
 an untrained one.
 
+`grid_regret(mechanism, jobs, platforms, free_nodes)` measures, for one window, how
+much each job could gain by misreporting while the others report truthfully, on the
+decisions the market applies. It moves one price at a time over a grid that includes
+the posted prices, where a job's candidates change, then scales the whole report: the
+item-wise grid of You et al. (2026). The result is a lower bound on the regret. VCG
+reads zero; pay what you bid reads up to each winner's surplus over the posted price.
+`refined_regret(regretformer, ...)` adds their guided gradient refinement for the
+learned mechanism, and reports beside it the gradient-only estimate that RegretFormer's
+own protocol gives.
+
 At each fixed window, the market advances every platform, admits arrivals, auctions
 the first `prefix` queued jobs, submits winners, and advances again. A mechanism must
 place every batch job that still fits the nodes left over, so a job waits only when no

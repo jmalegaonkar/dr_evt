@@ -8,7 +8,7 @@
 """RegretFormer's network over a window of jobs and platforms, and its outcomes."""
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import numpy as np
 import torch
@@ -30,6 +30,11 @@ class Window:
     free: torch.Tensor  # [B, M] free nodes
     exposed: torch.Tensor  # [B, M] exposed nodes
     jobs: torch.Tensor  # [B, N] true for jobs, false for padding
+
+    def repeat(self, count: int) -> "Window":
+        """Return a single window repeated `count` times along the batch."""
+        tensors = (getattr(self, field.name) for field in fields(self))
+        return Window(*(tensor.expand(count, *tensor.shape[1:]) for tensor in tensors))
 
     def cost(self) -> torch.Tensor:
         """Return the posted cost of every job on every platform."""
