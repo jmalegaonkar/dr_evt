@@ -47,20 +47,26 @@ cost(p)  = posted_price(p) * nodes * limit / 3600
 value(p) = bid_price(p)    * nodes * limit / 3600
 ```
 
-Trace preparation anchors each synthetic private price on the posted price of the
-trace's source profile. A seed, source, and pseudonymous user select a persistent
-persona; per-platform bids also apply a persistent user preference for each machine.
+By default, trace preparation anchors every synthetic private price on the mean posted
+price of the five-profile default federation. A seed, source, and pseudonymous user
+select a persistent persona. The trace's job identifier, or its source and original
+file order when it has no identifier, controls each job's random draws. Generated job
+numbers therefore do not change those draws when the selected interval changes.
+Per-platform bids also apply a persistent user preference for each machine.
 
 | Persona | Share | Price per node-hour |
 |---|---:|---|
-| sticker | 45% | Source profile's posted price |
-| tier | 35% | Source price, 2x when urgent, or 4x when urgent and heavy |
-| value | 15% | Source price times a lognormal multiple with median 3.0 and sigma 0.5 |
-| whale | 5% | Ten times the source price |
+| sticker | 45% | Reference price |
+| tier | 35% | Reference price, 2x when urgent, or 4x when urgent and heavy |
+| value | 15% | Reference price times a lognormal multiple with median 3.0 and sigma 0.5 |
+| whale | 5% | Ten times the reference price |
 
 An urgent tier job occurs with probability 20 percent. A tier user is a heavy premium
 user with probability 20 percent. By default, preparation uses historical run time as
-the execution limit and carries the original requested limit in `requested`.
+the execution limit and carries the original requested limit in `requested`. With
+`--anchor home`, each source must name a profile and its posted price becomes the
+reference. A per-platform home entry then equals the persona price exactly, while user
+preferences adjust only the other entries.
 
 ## Mechanism and loop
 
@@ -152,12 +158,14 @@ Prepare one merged interval from LC traces:
 ```bash
 python -m dr_evt_market prepare \
   --trace corona=/path/to/corona.csv --trace tioga=/path/to/tioga.csv \
-  --out jobs.csv --start 0 --hours 24 --seed 0 --gpu-fraction 0.5 \
+  --out jobs.csv --start 0 --hours 24 --seed 0 --anchor mean \
+  --gpu-fraction 0.5 \
   --per-platform corona,dane,matrix,tioga,tuolumne --limit-from runtime
 ```
 
-Use `--format simple` for the simple trace format. Each trace source must name a known
-profile so its posted price can anchor the generated bids.
+Use `--format simple` for the simple trace format. Under the default mean anchor, trace
+sources are community labels and need not name profiles. Use `--anchor home` to anchor
+each job on its source profile instead.
 
 ## Tests and notebook
 

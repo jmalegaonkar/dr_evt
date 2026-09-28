@@ -12,7 +12,13 @@ import math
 from collections import namedtuple
 from pathlib import Path
 
-Row = namedtuple("Row", "source order submit nodes limit runtime user ran")
+Row = namedtuple("Row", "source order identity submit nodes limit runtime user ran")
+
+
+def _identity(row, field: str, order: int) -> str:
+    """Return a stable identity from a trace identifier or file order."""
+    value = (row.get(field) or "").strip()
+    return f"job:{value}" if value not in {"", "-"} else f"row:{order}"
 
 
 def read_lc(source: str, path: str | Path) -> list[Row]:
@@ -37,6 +43,7 @@ def read_lc(source: str, path: str | Path) -> list[Row]:
                 Row(
                     source,
                     order,
+                    _identity(row, "job.id", order),
                     math.floor(float(row["t_submit"])),
                     nodes,
                     math.floor(limit),
@@ -63,6 +70,7 @@ def read_simple(source: str, path: str | Path) -> list[Row]:
                 Row(
                     source,
                     order,
+                    _identity(row, "job_id", order),
                     math.floor(float(row["job_submit_time"])),
                     nodes,
                     math.floor(float(row["time_limit"])),

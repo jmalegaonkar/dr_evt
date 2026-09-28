@@ -9,11 +9,15 @@
 
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 from dr_evt_market import Job, prepare, read_jobs, write_jobs
+from dr_evt_market.cli import main
 
 _DATA = Path(__file__).with_name("data")
+_REFERENCE_PRICE = 1.234
 
 
 class JobTests(unittest.TestCase):
@@ -55,7 +59,7 @@ class JobTests(unittest.TestCase):
         """LC preparation filters one interval and counts each drop reason."""
         jobs, summary = prepare(
             {"tioga": _DATA / "trace.csv"},
-            home_prices={"tioga": 2.7},
+            reference_price=_REFERENCE_PRICE,
             start=1000,
             hours=0.05,
             seed=3,
@@ -80,11 +84,11 @@ class JobTests(unittest.TestCase):
         self.assertEqual(
             [job.requires for job in jobs],
             [
-                frozenset({"gpu"}),
                 frozenset(),
                 frozenset({"gpu"}),
                 frozenset({"gpu"}),
                 frozenset({"gpu"}),
+                frozenset(),
             ],
         )
 
@@ -93,7 +97,7 @@ class JobTests(unittest.TestCase):
         traces = {"beta": _DATA / "trace.csv", "alpha": _DATA / "trace.csv"}
         jobs, summary = prepare(
             traces,
-            home_prices={"alpha": 2.0, "beta": 3.0},
+            reference_price=_REFERENCE_PRICE,
             start=1000,
             hours=0.05,
             seed=0,
@@ -108,7 +112,11 @@ class JobTests(unittest.TestCase):
     def test_prepare_is_deterministic_and_round_trips(self) -> None:
         """A seed fixes output bytes, and written rows read back as jobs."""
         traces = {"tioga": _DATA / "trace.csv"}
-        options = {"home_prices": {"tioga": 2.7}, "start": 1000, "hours": 0.05}
+        options = {
+            "reference_price": _REFERENCE_PRICE,
+            "start": 1000,
+            "hours": 0.05,
+        }
         jobs, _ = prepare(traces, seed=4, **options)
         same_jobs, _ = prepare(traces, seed=4, **options)
         other_jobs, _ = prepare(traces, seed=5, **options)
@@ -123,7 +131,7 @@ class JobTests(unittest.TestCase):
             self.assertEqual(read_jobs(first), jobs)
 
     def test_persona_and_price_are_hash_seeded(self) -> None:
-        """A fixed seed, source, user and job ID give a pinned price."""
+        """A fixed seed, source, user and trace row give a pinned price."""
         with tempfile.TemporaryDirectory() as directory:
             trace = Path(directory) / "simple.csv"
             trace.write_text(
@@ -132,18 +140,18 @@ class JobTests(unittest.TestCase):
             )
             jobs, _ = prepare(
                 {"tioga": trace},
-                home_prices={"tioga": 2.7},
+                reference_price=_REFERENCE_PRICE,
                 trace_format="simple",
                 seed=8,
             )
         self.assertEqual(jobs[0].persona, "value")
-        self.assertEqual(jobs[0].bid, 12.468)
+        self.assertEqual(jobs[0].bid, 4.7308)
 
     def test_gpu_fraction_and_requires_override(self) -> None:
         """GPU draws are per job, and an explicit requirement overrides them."""
         traces = {"tioga": _DATA / "trace.csv"}
         options = {
-            "home_prices": {"tioga": 2.7},
+            "reference_price": _REFERENCE_PRICE,
             "start": 1000,
             "hours": 0.05,
             "seed": 4,
@@ -169,7 +177,7 @@ class JobTests(unittest.TestCase):
             )
             jobs, summary = prepare(
                 {"simple": trace},
-                home_prices={"simple": 2.0},
+                reference_price=_REFERENCE_PRICE,
                 trace_format="simple",
             )
         self.assertEqual([job.submit_s for job in jobs], [0, 2])
@@ -215,7 +223,7 @@ class JobTests(unittest.TestCase):
         traces = {"tioga": _DATA / "trace.csv"}
         jobs, _ = prepare(
             traces,
-            home_prices={"tioga": 2.7},
+            reference_price=_REFERENCE_PRICE,
             start=1000,
             hours=0.05,
             seed=4,
@@ -223,14 +231,14 @@ class JobTests(unittest.TestCase):
         )
         again, _ = prepare(
             traces,
-            home_prices={"tioga": 2.7},
+            reference_price=_REFERENCE_PRICE,
             start=1000,
             hours=0.05,
             seed=4,
             per_platform=("corona", "matrix"),
         )
         self.assertTrue(all(list(job.bid) == ["corona", "matrix"] for job in jobs))
-        self.assertEqual(jobs[0].bid, {"corona": 4.8836, "matrix": 5.0215})
+        self.assertEqual(jobs[0].bid, {"corona": 5.9795, "matrix": 6.1484})
         self.assertEqual(jobs, again)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "mapped.csv"
@@ -243,7 +251,7 @@ class JobTests(unittest.TestCase):
         """Preparation carries the request and selects either limit source."""
         traces = {"tioga": _DATA / "trace.csv"}
         options = {
-            "home_prices": {"tioga": 2.7},
+            "reference_price": _REFERENCE_PRICE,
             "start": 1000,
             "hours": 0.05,
         }
@@ -253,6 +261,131 @@ class JobTests(unittest.TestCase):
         self.assertEqual(request_jobs[0].limit_s, 120)
         self.assertEqual(runtime_jobs[0].requested_s, request_jobs[0].requested_s)
         self.assertEqual(runtime_jobs[0].requested_s, 120)
+
+    def test_home_per_platform_bid_uses_persona_price(self) -> None:
+        """A home entry keeps the persona price while other entries vary."""
+        traces = {"tioga": _DATA / "trace.csv"}
+        options = {
+            "anchor": "home",
+            "home_prices": {"tioga": 2.7},
+            "start": 1000,
+            "hours": 0.05,
+            "seed": 4,
+        }
+        scalar, _ = prepare(traces, **options)
+        mapped, _ = prepare(traces, per_platform=("corona", "tioga"), **options)
+        self.assertEqual(
+            [job.bid for job in scalar],
+            [job.bid["tioga"] for job in mapped],
+        )
+        self.assertTrue(any(job.bid["corona"] != job.bid["tioga"] for job in mapped))
+
+    def test_job_draws_follow_trace_row_identity(self) -> None:
+        """Changing the interval does not change a retained row's draws."""
+        with tempfile.TemporaryDirectory() as directory:
+            for id_header, id_values in (
+                ("job_id,", "before,target"),
+                ("", ","),
+            ):
+                with self.subTest(trace_id=bool(id_header)):
+                    before_id, target_id = id_values.split(",")
+                    trace = Path(directory) / f"simple-{bool(id_header)}.csv"
+                    trace.write_text(
+                        f"{id_header}job_submit_time,num_nodes,time_limit,user\n"
+                        f"{before_id + ',' if id_header else ''}100,1,60,"
+                        "fixed-user\n"
+                        f"{target_id + ',' if id_header else ''}200,1,60,"
+                        "fixed-user\n",
+                        encoding="utf-8",
+                    )
+                    options = {
+                        "reference_price": _REFERENCE_PRICE,
+                        "trace_format": "simple",
+                        "seed": 8,
+                    }
+                    whole, _ = prepare({"tioga": trace}, start=100, **options)
+                    sliced, _ = prepare({"tioga": trace}, start=200, **options)
+                    self.assertEqual(whole[1].job_id, "j000002")
+                    self.assertEqual(sliced[0].job_id, "j000001")
+                    self.assertEqual(
+                        (
+                            whole[1].persona,
+                            whole[1].bid,
+                            whole[1].requires,
+                        ),
+                        (
+                            sliced[0].persona,
+                            sliced[0].bid,
+                            sliced[0].requires,
+                        ),
+                    )
+
+    def test_mean_and_home_anchors(self) -> None:
+        """Mean is the default, while home anchoring needs a home price."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace = root / "simple.csv"
+            trace.write_text(
+                "job_id,job_submit_time,num_nodes,time_limit,user\n"
+                "stable,100,2,60,fixed-user\n",
+                encoding="utf-8",
+            )
+            direct, _ = prepare(
+                {"community": trace},
+                reference_price=_REFERENCE_PRICE,
+                trace_format="simple",
+                seed=8,
+            )
+            mean_path = root / "mean.csv"
+            with redirect_stdout(StringIO()):
+                status = main(
+                    [
+                        "prepare",
+                        "--trace",
+                        f"community={trace}",
+                        "--out",
+                        str(mean_path),
+                        "--format",
+                        "simple",
+                        "--seed",
+                        "8",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            self.assertEqual(read_jobs(mean_path), direct)
+
+            home_path = root / "home.csv"
+            with redirect_stdout(StringIO()):
+                status = main(
+                    [
+                        "prepare",
+                        "--trace",
+                        f"tioga={trace}",
+                        "--out",
+                        str(home_path),
+                        "--format",
+                        "simple",
+                        "--seed",
+                        "8",
+                        "--anchor",
+                        "home",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            home, _ = prepare(
+                {"tioga": trace},
+                anchor="home",
+                home_prices={"tioga": 2.7},
+                trace_format="simple",
+                seed=8,
+            )
+            self.assertEqual(read_jobs(home_path), home)
+            with self.assertRaises(ValueError):
+                prepare(
+                    {"tioga": trace},
+                    anchor="home",
+                    trace_format="simple",
+                )
 
 
 if __name__ == "__main__":

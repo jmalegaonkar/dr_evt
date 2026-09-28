@@ -30,7 +30,9 @@ def _drop_reason(row):
 def prepare(
     traces,
     *,
-    home_prices,
+    reference_price=None,
+    home_prices=None,
+    anchor="mean",
     trace_format="lc",
     start=None,
     hours=None,
@@ -44,7 +46,13 @@ def prepare(
     readers = {"lc": read_lc, "simple": read_simple}
     if trace_format not in readers:
         raise ValueError("trace_format must be 'lc' or 'simple'")
-    if any(source not in home_prices for source in traces):
+    if anchor not in {"mean", "home"}:
+        raise ValueError("anchor must be 'mean' or 'home'")
+    if anchor == "mean" and reference_price is None:
+        raise ValueError("mean anchor needs a reference price")
+    if anchor == "home" and (
+        home_prices is None or any(source not in home_prices for source in traces)
+    ):
         raise ValueError("every trace source must have a home price")
     if limit_from not in {"runtime", "request"}:
         raise ValueError("limit_from must be 'runtime' or 'request'")
@@ -92,14 +100,19 @@ def prepare(
     for index, record in enumerate(kept, start=1):
         job_id = f"j{index:06d}"
         user = record.user if record.user is not None else job_id
-        job_rng = job_generator(seed, record.source, user, job_id)
+        persona_user = record.user if record.user is not None else record.identity
+        job_rng = job_generator(seed, record.source, record.identity)
+        anchor_price = (
+            reference_price if anchor == "mean" else home_prices[record.source]
+        )
         persona, bid = persona_bid(
             seed,
             record.source,
-            user,
-            job_id,
-            home_prices[record.source],
+            persona_user,
+            record.identity,
+            anchor_price,
             per_platform,
+            home_platform=record.source if anchor == "home" else None,
             job_rng=job_rng,
         )
         requirement_set = requirement_override

@@ -18,6 +18,9 @@ from .mechanism import MECHANISMS, record_windows, train_regretformer
 from .platform import DEFAULT_FEDERATION, PLATFORMS, federation
 
 _PROFILES = {profile.name: profile for profile in PLATFORMS}
+_DEFAULT_REFERENCE_PRICE = sum(
+    _PROFILES[name].price_per_node_hour for name in DEFAULT_FEDERATION
+) / len(DEFAULT_FEDERATION)
 
 
 def _parser():
@@ -54,6 +57,7 @@ def _parser():
     prepare_parser.add_argument("--start", type=float)
     prepare_parser.add_argument("--hours", type=float)
     prepare_parser.add_argument("--seed", type=int, default=0)
+    prepare_parser.add_argument("--anchor", choices=("mean", "home"), default="mean")
     prepare_parser.add_argument("--gpu-fraction", type=float, default=0.5)
     prepare_parser.add_argument("--requires")
     prepare_parser.add_argument("--per-platform")
@@ -127,21 +131,25 @@ def _train(args):
 
 def _prepare(args):
     traces = {}
-    home_prices = {}
     for item in args.trace:
         if "=" not in item:
             raise ValueError(f"trace must be name=path: {item!r}")
         name, path = item.split("=", 1)
-        if name not in _PROFILES:
-            raise ValueError(f"unknown platform {name!r}")
         traces[name] = Path(path)
-        home_prices[name] = _PROFILES[name].price_per_node_hour
+    home_prices = None
+    if args.anchor == "home":
+        unknown = next((name for name in traces if name not in _PROFILES), None)
+        if unknown is not None:
+            raise ValueError(f"unknown platform {unknown!r}")
+        home_prices = {name: _PROFILES[name].price_per_node_hour for name in traces}
     per_platform = None
     if args.per_platform is not None:
         per_platform = _names(args.per_platform)
     jobs, summary = prepare(
         traces,
+        reference_price=_DEFAULT_REFERENCE_PRICE,
         home_prices=home_prices,
+        anchor=args.anchor,
         trace_format=args.format,
         start=args.start,
         hours=args.hours,

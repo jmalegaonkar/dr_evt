@@ -11,11 +11,11 @@ import hashlib
 import math
 
 
-def job_generator(seed: int, source: str, user: str, job_id: str):
+def job_generator(seed: int, source: str, row_identity: str):
     """Return the deterministic random generator for one job."""
     import numpy
 
-    key = f"{seed}:{source}:{user}:{job_id}"
+    key = f"{seed}:{source}:{row_identity}"
     digest = hashlib.sha256(key.encode()).digest()[:8]
     return numpy.random.default_rng(int.from_bytes(digest, "big"))
 
@@ -24,10 +24,11 @@ def persona_bid(
     seed: int,
     source: str,
     user: str,
-    job_id: str,
-    home_price: float,
+    row_identity: str,
+    reference_price: float,
     per_platform,
     *,
+    home_platform=None,
     job_rng=None,
 ) -> tuple[str, float | dict[str, float]]:
     """Return the deterministic persona and bid for one job."""
@@ -39,7 +40,7 @@ def persona_bid(
 
     user_rng = generator(f"{seed}:{source}:{user}")
     if job_rng is None:
-        job_rng = job_generator(seed, source, user, job_id)
+        job_rng = job_generator(seed, source, row_identity)
     draw = user_rng.random()
     heavy = user_rng.random() < 0.2
     if draw < 0.45:
@@ -53,10 +54,13 @@ def persona_bid(
         multiplier = job_rng.lognormal(math.log(3.0), 0.5)
     else:
         persona, multiplier = "whale", 10.0
+    persona_price = reference_price * multiplier
     if per_platform is None:
-        return persona, round(home_price * multiplier, 4)
-    bid = {
-        name: round(home_price * multiplier * math.exp(user_rng.normal(0.0, 0.3)), 4)
-        for name in per_platform
-    }
+        return persona, round(persona_price, 4)
+    bid = {}
+    for name in per_platform:
+        preference = 1.0
+        if name != home_platform:
+            preference = math.exp(user_rng.normal(0.0, 0.3))
+        bid[name] = round(persona_price * preference, 4)
     return persona, bid
