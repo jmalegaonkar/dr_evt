@@ -121,12 +121,14 @@ that of the mechanism the market applies: judge a trained network by `refined_re
 on windows it was not trained on.
 
 At each fixed window, the market advances every platform, admits arrivals, auctions
-the first `prefix` queued jobs, submits winners, and advances again. A mechanism must
-place every batch job that still fits the nodes left over, so a job waits only when no
-platform has room for it; anything else raises `MarketError`. The market's guarantee is
-that every accepted winner starts in its market window. Per-job begin and end are
-recorded by the market from that guarantee, not read from `dr_evt`, and streamed jobs
-run their speed-adjusted limit.
+the first `prefix` queued jobs that have a candidate at the current free nodes, submits
+winners, and advances again; jobs without a current candidate are skipped for the
+window without losing their queue position. A mechanism must place every batch job
+that still fits the nodes left over, so a job waits only when no platform has room for
+it; anything else raises `MarketError`. The market's guarantee is that every accepted
+winner starts in its market window. Per-job begin and end are recorded by the market
+from that guarantee, not read from `dr_evt`, and streamed jobs run their speed-adjusted
+limit.
 
 ## Outputs
 

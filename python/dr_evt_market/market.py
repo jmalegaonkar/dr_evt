@@ -169,8 +169,13 @@ def run(
             queue.append(arrivals[arrival])
             arrival += 1
 
-        batch = queue[:prefix]
         free = {name: platform.free_nodes() for name, platform in platforms.items()}
+        batch = []
+        for job in queue:
+            if candidates(job, platforms, free):
+                batch.append(job)
+                if len(batch) == prefix:
+                    break
         decisions = list(mechanism.decide(batch, platforms, free))
         winners = _check_decisions(batch, platforms, free, decisions)
         grouped = {name: [] for name in platforms}

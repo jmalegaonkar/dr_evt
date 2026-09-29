@@ -139,6 +139,23 @@ class MarketTests(unittest.TestCase):
         self.assertEqual(len(result.routed), 18)
         self.assertTrue(all(count <= 2 for count in per_window.values()))
 
+    def test_wide_head_job_does_not_block_prefix(self) -> None:
+        """A temporarily wide head job does not hide a placeable job."""
+        jobs = [
+            Job("running", 0, 10, 120, 2.0, {"gpu"}),
+            Job("wide", 0, 3, 60, 2.0, {"gpu"}),
+            Job("narrow", 0, 2, 60, 2.0, {"gpu"}),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(
+                Path(directory) / "platforms", share=0.1, names=("corona",)
+            )
+            result = run(jobs, platforms, Vcg(), window_s=60, prefix=1)
+        self.assertEqual(
+            {row.job_id: row.begin_s for row in result.routed},
+            {"running": 0, "wide": 120, "narrow": 60},
+        )
+
     def test_invalid_mechanism_decisions_raise(self) -> None:
         """Outside-batch and over-capacity decisions violate the guarantee."""
         jobs = read_jobs(_DATA / "jobs.csv")
