@@ -15,10 +15,16 @@ from pathlib import Path
 Row = namedtuple("Row", "source order identity submit nodes limit runtime user ran")
 
 
+def _text(row, field: str) -> str | None:
+    """Return a field's text, or None when it is missing, blank or '-'."""
+    value = (row.get(field) or "").strip()
+    return None if value in {"", "-"} else value
+
+
 def _identity(row, field: str, order: int) -> str:
     """Return a stable identity from a trace identifier or file order."""
-    value = (row.get(field) or "").strip()
-    return f"job:{value}" if value not in {"", "-"} else f"row:{order}"
+    value = _text(row, field)
+    return f"row:{order}" if value is None else f"job:{value}"
 
 
 def read_lc(source: str, path: str | Path) -> list[Row]:
@@ -48,7 +54,7 @@ def read_lc(source: str, path: str | Path) -> list[Row]:
                     nodes,
                     math.floor(limit),
                     runtime,
-                    row["user.name"],
+                    _text(row, "user.name"),
                     ran,
                 )
             )
@@ -75,7 +81,7 @@ def read_simple(source: str, path: str | Path) -> list[Row]:
                     nodes,
                     math.floor(float(row["time_limit"])),
                     runtime,
-                    row.get("user"),
+                    _text(row, "user"),
                     True,
                 )
             )

@@ -52,13 +52,13 @@ scalar_value(p) = bid              * nodes * limit            / 3600
 mapped_value(p) = bid(p)           * nodes * limit / speed(p) / 3600
 ```
 
-By default, trace preparation anchors every synthetic private price on the mean posted
-price of the five-profile default federation. A seed, source, and pseudonymous user
-select a persistent persona. The trace's job identifier, or its source and original
-file order when it has no identifier, controls each job's random draws. Generated job
-numbers therefore do not change those draws when the selected interval changes.
-Per-platform bids also apply a persistent user preference for each machine and scale
-the offered hourly price by that machine's speed for the job.
+Trace preparation anchors every synthetic private price on the mean posted price of the
+five-profile default federation. A seed, source, and pseudonymous user select a
+persistent persona; a row without a user is its own user. The trace's job identifier, or
+its source and original file order when it has no identifier, controls each job's random
+draws. Generated job numbers therefore do not change those draws when the selected
+interval changes. Per-platform bids also apply a persistent user preference for each
+machine and scale the offered hourly price by that machine's speed for the job.
 
 | Persona | Share | Price per node-hour |
 |---|---:|---|
@@ -68,12 +68,10 @@ the offered hourly price by that machine's speed for the job.
 | whale | 5% | Ten times the reference price |
 
 An urgent tier job occurs with probability 20 percent. A tier user is a heavy premium
-user with probability 20 percent. By default, preparation uses historical run time as
-the execution limit. A job is priced, released and valued on that run time, so users
-pay for what they use; the original requested limit is carried in `requested` but
-otherwise unused. With `--anchor home`, each source must name a profile and its posted
-price becomes the reference. A per-platform home entry uses no preference factor,
-while its speed still converts the persona price into that platform's hourly price.
+user with probability 20 percent. Preparation uses the historical run time as the
+execution limit, or the requested limit when a trace has no run time. A job is priced,
+released and valued on that run time, so users pay for what they use; the requested
+limit is carried in `requested` but otherwise unused.
 
 ## Mechanism and loop
 
@@ -181,14 +179,13 @@ Prepare one merged interval from LC traces:
 ```bash
 python -m dr_evt_market prepare \
   --trace corona=/path/to/corona.csv --trace tioga=/path/to/tioga.csv \
-  --out jobs.csv --start 0 --hours 24 --seed 0 --anchor mean \
-  --gpu-fraction 0.5 \
-  --per-platform corona,dane,matrix,tioga,tuolumne --limit-from runtime
+  --out jobs.csv --hours 24 --seed 0 --gpu-fraction 0.5 \
+  --per-platform corona,dane,matrix,tioga,tuolumne
 ```
 
-Use `--format simple` for the simple trace format. Under the default mean anchor, trace
-sources are community labels and need not name profiles. Use `--anchor home` to anchor
-each job on its source profile instead.
+The interval starts at the earliest submission unless `--start` gives a time in the
+traces' own clock, which is epoch seconds for LC traces. Use `--format simple` for the
+simple trace format. Trace sources are community labels and need not name profiles.
 
 ## Tests and notebook
 

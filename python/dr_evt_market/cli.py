@@ -77,13 +77,9 @@ def _parser():
     prepare_parser.add_argument("--start", type=float)
     prepare_parser.add_argument("--hours", type=float)
     prepare_parser.add_argument("--seed", type=int, default=0)
-    prepare_parser.add_argument("--anchor", choices=("mean", "home"), default="mean")
     prepare_parser.add_argument("--gpu-fraction", type=float, default=0.5)
     prepare_parser.add_argument("--requires")
     prepare_parser.add_argument("--per-platform")
-    prepare_parser.add_argument(
-        "--limit-from", choices=("runtime", "request"), default="runtime"
-    )
     return parser
 
 
@@ -156,12 +152,6 @@ def _prepare(args):
             raise ValueError(f"trace must be name=path: {item!r}")
         name, path = item.split("=", 1)
         traces[name] = Path(path)
-    home_prices = None
-    if args.anchor == "home":
-        unknown = next((name for name in traces if name not in _PROFILES), None)
-        if unknown is not None:
-            raise ValueError(f"unknown platform {unknown!r}")
-        home_prices = {name: _PROFILES[name].price_per_node_hour for name in traces}
     per_platform = None
     speeds = None
     if args.per_platform is not None:
@@ -170,9 +160,7 @@ def _prepare(args):
     jobs, summary = prepare(
         traces,
         reference_price=_DEFAULT_REFERENCE_PRICE,
-        home_prices=home_prices,
         speeds=speeds,
-        anchor=args.anchor,
         trace_format=args.format,
         start=args.start,
         hours=args.hours,
@@ -180,7 +168,6 @@ def _prepare(args):
         gpu_fraction=args.gpu_fraction,
         requires=args.requires,
         per_platform=per_platform,
-        limit_from=args.limit_from,
     )
     write_jobs(jobs, args.out)
     for key, value in summary.items():

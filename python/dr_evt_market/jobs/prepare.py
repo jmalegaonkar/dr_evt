@@ -10,7 +10,7 @@
 import math
 from numbers import Real
 
-from .bids import job_generator, persona_terms, price_bid
+from .bids import generator, persona_terms, price_bid
 from .job import Job
 from .traces import read_lc, read_simple
 
@@ -30,10 +30,8 @@ def _drop_reason(row):
 def prepare(
     traces,
     *,
-    reference_price=None,
-    home_prices=None,
+    reference_price,
     speeds=None,
-    anchor="mean",
     trace_format="lc",
     start=None,
     hours=None,
@@ -41,26 +39,15 @@ def prepare(
     gpu_fraction=0.5,
     requires=None,
     per_platform=None,
-    limit_from="runtime",
 ) -> tuple[list[Job], dict[str, int]]:
     """Prepare deterministic jobs from one interval across named traces."""
     readers = {"lc": read_lc, "simple": read_simple}
     if trace_format not in readers:
         raise ValueError("trace_format must be 'lc' or 'simple'")
-    if anchor not in {"mean", "home"}:
-        raise ValueError("anchor must be 'mean' or 'home'")
-    if anchor == "mean" and reference_price is None:
-        raise ValueError("mean anchor needs a reference price")
-    if anchor == "home" and (
-        home_prices is None or any(source not in home_prices for source in traces)
-    ):
-        raise ValueError("every trace source must have a home price")
     if per_platform is not None and (
         speeds is None or any(name not in speeds for name in per_platform)
     ):
         raise ValueError("per-platform bids need every platform's speeds")
-    if limit_from not in {"runtime", "request"}:
-        raise ValueError("limit_from must be 'runtime' or 'request'")
     if (
         isinstance(gpu_fraction, bool)
         or not isinstance(gpu_fraction, Real)
@@ -103,20 +90,9 @@ def prepare(
     requirement_override = None if requires is None else frozenset(requires.split())
     jobs = []
     for index, record in enumerate(kept, start=1):
-        job_id = f"j{index:06d}"
-        user = record.user if record.user is not None else job_id
-        persona_user = record.user if record.user is not None else record.identity
-        job_rng = job_generator(seed, record.source, record.identity)
-        anchor_price = (
-            reference_price if anchor == "mean" else home_prices[record.source]
-        )
+        job_rng = generator(seed, record.source, record.identity)
         persona, persona_price, preference_rng = persona_terms(
-            seed,
-            record.source,
-            persona_user,
-            record.identity,
-            anchor_price,
-            job_rng=job_rng,
+            seed, record.source, record.user, reference_price, job_rng
         )
         requirement_set = requirement_override
         if requirement_set is None:
@@ -133,30 +109,19 @@ def prepare(
                 if hardware in speeds[name]
             }
         )
-        bid = price_bid(
-            persona_price,
-            per_platform,
-            speeds=job_speeds,
-            home_platform=record.source if anchor == "home" else None,
-            preference_rng=preference_rng,
-        )
-        limit = (
-            record.runtime
-            if limit_from == "runtime" and record.runtime is not None
-            else record.limit
-        )
+        bid = price_bid(persona_price, per_platform, job_speeds, preference_rng)
         jobs.append(
             Job(
-                job_id,
+                f"j{index:06d}",
                 record.submit - origin,
                 record.nodes,
-                limit,
+                record.limit if record.runtime is None else record.runtime,
                 bid,
                 requirement_set,
                 record.runtime,
                 record.limit,
                 record.source,
-                user,
+                record.user or "",
                 persona,
             )
         )

@@ -256,43 +256,44 @@ class JobTests(unittest.TestCase):
             self.assertIn("bid,bid:corona,bid:matrix,requires", header)
             self.assertEqual(read_jobs(path), jobs)
 
-    def test_limit_can_follow_runtime_or_request(self) -> None:
-        """Preparation carries the request and selects either limit source."""
-        traces = {"tioga": _DATA / "trace.csv"}
-        options = {
-            "reference_price": _REFERENCE_PRICE,
-            "start": 1000,
-            "hours": 0.05,
-        }
-        runtime_jobs, _ = prepare(traces, **options)
-        request_jobs, _ = prepare(traces, limit_from="request", **options)
-        self.assertEqual(runtime_jobs[0].limit_s, 40)
-        self.assertEqual(request_jobs[0].limit_s, 120)
-        self.assertEqual(runtime_jobs[0].requested_s, request_jobs[0].requested_s)
-        self.assertEqual(runtime_jobs[0].requested_s, 120)
+    def test_limit_is_the_run_time_or_else_the_request(self) -> None:
+        """The limit is the run time, or the request when the trace has none."""
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / "simple.csv"
+            trace.write_text(
+                "job_submit_time,num_nodes,time_limit,actual_run_time\n"
+                "0,1,120,40\n"
+                "1,1,60,\n",
+                encoding="utf-8",
+            )
+            jobs, _ = prepare(
+                {"simple": trace},
+                reference_price=_REFERENCE_PRICE,
+                trace_format="simple",
+            )
+        self.assertEqual([job.limit_s for job in jobs], [40, 60])
+        self.assertEqual([job.runtime_s for job in jobs], [40, None])
+        self.assertEqual([job.requested_s for job in jobs], [120, 60])
 
-    def test_home_per_platform_bid_uses_persona_price(self) -> None:
-        """A home entry keeps the persona price while other entries vary."""
-        traces = {"tioga": _DATA / "trace.csv"}
-        options = {
-            "anchor": "home",
-            "home_prices": {"tioga": 2.7},
-            "start": 1000,
-            "hours": 0.05,
-            "seed": 4,
-        }
-        scalar, _ = prepare(traces, **options)
-        mapped, _ = prepare(
-            traces,
-            per_platform=("corona", "tioga"),
-            speeds=_UNIT_SPEEDS,
-            **options,
-        )
-        self.assertEqual(
-            [job.bid for job in scalar],
-            [job.bid["tioga"] for job in mapped],
-        )
-        self.assertTrue(any(job.bid["corona"] != job.bid["tioga"] for job in mapped))
+    def test_a_row_without_a_user_is_its_own_user(self) -> None:
+        """A row without a user draws its persona and job terms independently."""
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / "simple.csv"
+            trace.write_text(
+                "job_submit_time,num_nodes,time_limit,user\n"
+                + "".join(f"{second},1,60,-\n" for second in range(400)),
+                encoding="utf-8",
+            )
+            jobs, _ = prepare(
+                {"simple": trace},
+                reference_price=_REFERENCE_PRICE,
+                trace_format="simple",
+            )
+        stickers = [job for job in jobs if job.persona == "sticker"]
+        tiers = [job for job in jobs if job.persona == "tier"]
+        self.assertEqual({job.user for job in jobs}, {""})
+        self.assertEqual({bool(job.requires) for job in stickers}, {False, True})
+        self.assertTrue(any(job.bid > _REFERENCE_PRICE for job in tiers))
 
     def test_per_platform_persona_bids_scale_with_speed(self) -> None:
         """Mapped persona bids include the selected hardware's speed."""
@@ -355,8 +356,8 @@ class JobTests(unittest.TestCase):
                         ),
                     )
 
-    def test_mean_and_home_anchors(self) -> None:
-        """Mean is the default, while home anchoring needs a home price."""
+    def test_command_line_prices_on_the_mean_posted_price(self) -> None:
+        """The command line anchors every persona on the mean posted price."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             trace = root / "simple.csv"
@@ -371,7 +372,7 @@ class JobTests(unittest.TestCase):
                 trace_format="simple",
                 seed=8,
             )
-            mean_path = root / "mean.csv"
+            path = root / "jobs.csv"
             with redirect_stdout(StringIO()):
                 status = main(
                     [
@@ -379,7 +380,7 @@ class JobTests(unittest.TestCase):
                         "--trace",
                         f"community={trace}",
                         "--out",
-                        str(mean_path),
+                        str(path),
                         "--format",
                         "simple",
                         "--seed",
@@ -387,40 +388,7 @@ class JobTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(status, 0)
-            self.assertEqual(read_jobs(mean_path), direct)
-
-            home_path = root / "home.csv"
-            with redirect_stdout(StringIO()):
-                status = main(
-                    [
-                        "prepare",
-                        "--trace",
-                        f"tioga={trace}",
-                        "--out",
-                        str(home_path),
-                        "--format",
-                        "simple",
-                        "--seed",
-                        "8",
-                        "--anchor",
-                        "home",
-                    ]
-                )
-            self.assertEqual(status, 0)
-            home, _ = prepare(
-                {"tioga": trace},
-                anchor="home",
-                home_prices={"tioga": 2.7},
-                trace_format="simple",
-                seed=8,
-            )
-            self.assertEqual(read_jobs(home_path), home)
-            with self.assertRaises(ValueError):
-                prepare(
-                    {"tioga": trace},
-                    anchor="home",
-                    trace_format="simple",
-                )
+            self.assertEqual(read_jobs(path), direct)
 
 
 if __name__ == "__main__":
