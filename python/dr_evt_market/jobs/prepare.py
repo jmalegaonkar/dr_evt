@@ -10,7 +10,7 @@
 import math
 from numbers import Real
 
-from .bids import job_generator, persona_bid
+from .bids import job_generator, persona_terms, price_bid
 from .job import Job
 from .traces import read_lc, read_simple
 
@@ -32,6 +32,7 @@ def prepare(
     *,
     reference_price=None,
     home_prices=None,
+    speeds=None,
     anchor="mean",
     trace_format="lc",
     start=None,
@@ -54,6 +55,10 @@ def prepare(
         home_prices is None or any(source not in home_prices for source in traces)
     ):
         raise ValueError("every trace source must have a home price")
+    if per_platform is not None and (
+        speeds is None or any(name not in speeds for name in per_platform)
+    ):
+        raise ValueError("per-platform bids need every platform's speeds")
     if limit_from not in {"runtime", "request"}:
         raise ValueError("limit_from must be 'runtime' or 'request'")
     if (
@@ -105,14 +110,12 @@ def prepare(
         anchor_price = (
             reference_price if anchor == "mean" else home_prices[record.source]
         )
-        persona, bid = persona_bid(
+        persona, persona_price, preference_rng = persona_terms(
             seed,
             record.source,
             persona_user,
             record.identity,
             anchor_price,
-            per_platform,
-            home_platform=record.source if anchor == "home" else None,
             job_rng=job_rng,
         )
         requirement_set = requirement_override
@@ -120,6 +123,23 @@ def prepare(
             requirement_set = (
                 frozenset({"gpu"}) if job_rng.random() < gpu_fraction else frozenset()
             )
+        hardware = "gpu" if "gpu" in requirement_set else "cpu"
+        job_speeds = (
+            None
+            if per_platform is None
+            else {
+                name: speeds[name][hardware]
+                for name in per_platform
+                if hardware in speeds[name]
+            }
+        )
+        bid = price_bid(
+            persona_price,
+            per_platform,
+            speeds=job_speeds,
+            home_platform=record.source if anchor == "home" else None,
+            preference_rng=preference_rng,
+        )
         limit = (
             record.runtime
             if limit_from == "runtime" and record.runtime is not None

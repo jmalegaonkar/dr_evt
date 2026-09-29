@@ -112,6 +112,7 @@ def _configuration(platforms, mechanism, window_s, prefix):
                 "exposed_nodes": platform.exposed_nodes,
                 "price_per_node_hour": platform.price_per_node_hour,
                 "hardware": sorted(platform.hardware),
+                "speed": platform.speed,
             }
             for name, platform in platforms.items()
         },
@@ -198,7 +199,7 @@ def run(
                     decision.charge,
                     job.submit_s,
                     t,
-                    t + job.limit_s,
+                    t + platforms[decision.platform].run_time(job),
                 )
             )
         winner_ids = {decision.job_id for decision in decisions}

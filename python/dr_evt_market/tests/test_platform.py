@@ -18,19 +18,33 @@ from dr_evt_market import (
     DEFAULT_FEDERATION,
     Matrix,
     PLATFORMS,
+    Platform,
     Tioga,
     Tuolumne,
     federation,
 )
 
 
-def _job(num_nodes: int, limit_s: int, *requires: str) -> SimpleNamespace:
+def _job(
+    num_nodes: int, limit_s: int, *requires: str, requested_s=None
+) -> SimpleNamespace:
     """Build the minimal job shape accepted by a platform."""
     return SimpleNamespace(
         num_nodes=num_nodes,
         limit_s=limit_s,
         requires=frozenset(requires),
+        requested_s=requested_s,
     )
+
+
+class _TwiceAsFast(Platform):
+    """A small test profile with one speed for both hardware types."""
+
+    name = "twice"
+    total_nodes = 2
+    price_per_node_hour = 4.0
+    hardware = frozenset({"cpu", "gpu"})
+    speed = {"cpu": 2.0, "gpu": 2.0}
 
 
 class PlatformTests(unittest.TestCase):
@@ -52,7 +66,7 @@ class PlatformTests(unittest.TestCase):
                 Dane(root / "large", share=1.5)
 
     def test_jobs_start_together_and_release_nodes(self) -> None:
-        """Jobs that fit together start immediately and release at their limit."""
+        """Jobs start together and release at their platform run times."""
         with tempfile.TemporaryDirectory() as directory:
             platform = Tuolumne(directory, share=0.1)
             platform.advance_to(0)
@@ -64,7 +78,10 @@ class PlatformTests(unittest.TestCase):
             self.assertEqual(platform.waiting(), 0)
             self.assertEqual(platform.free_nodes(), platform.exposed_nodes - 50)
 
-            platform.advance_to(10)
+            platform.advance_to(7)
+            self.assertEqual(platform.free_nodes(), platform.exposed_nodes - 30)
+
+            platform.advance_to(8)
             self.assertEqual(platform.free_nodes(), platform.exposed_nodes)
 
     def test_waiting_job_starts_when_nodes_return(self) -> None:
@@ -77,9 +94,12 @@ class PlatformTests(unittest.TestCase):
             self.assertEqual(platform.waiting(), 1)
             self.assertEqual(platform.free_nodes(), platform.exposed_nodes - 2)
 
-            platform.advance_to(10)
+            platform.advance_to(4)
             self.assertEqual(platform.waiting(), 0)
             self.assertEqual(platform.free_nodes(), platform.exposed_nodes - 2)
+
+            platform.advance_to(10)
+            self.assertEqual(platform.free_nodes(), platform.exposed_nodes)
 
     def test_fits_and_cost_use_capacity_hardware_and_price(self) -> None:
         """Fit checks tags and exposed nodes, while cost uses the profile price."""
@@ -94,7 +114,7 @@ class PlatformTests(unittest.TestCase):
             self.assertFalse(dane.fits(gpu_job))
             self.assertTrue(matrix.fits(gpu_job))
             self.assertFalse(matrix.fits(_job(matrix.exposed_nodes + 1, 1)))
-            self.assertEqual(matrix.cost(gpu_job), 3.2)
+            self.assertAlmostEqual(matrix.cost(gpu_job), 3.2 / 3.695)
             self.assertEqual(
                 [profile.hardware for profile in PLATFORMS],
                 [
@@ -135,6 +155,16 @@ class PlatformTests(unittest.TestCase):
                     "tuolumne": 0.19,
                 },
             )
+            self.assertEqual(
+                {name: value.speed for name, value in platforms.items()},
+                {
+                    "corona": {"cpu": 1.0, "gpu": 1.0},
+                    "dane": {"cpu": 0.861},
+                    "matrix": {"cpu": 2.574, "gpu": 3.695},
+                    "tioga": {"cpu": 1.594, "gpu": 7.042},
+                    "tuolumne": {"cpu": 1.401, "gpu": 3.313},
+                },
+            )
             selected = federation(directory, share=0.05, names=("dane", "corona"))
             self.assertEqual(list(selected), ["dane", "corona"])
             self.assertEqual(
@@ -142,6 +172,22 @@ class PlatformTests(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 federation(directory, names=("unknown",))
+
+    def test_speed_halves_run_time_and_priced_reservation(self) -> None:
+        """Speed two halves both node occupancy and reservation cost."""
+        with tempfile.TemporaryDirectory() as directory:
+            platform = _TwiceAsFast(directory)
+            job = _job(1, 10, "gpu", requested_s=20)
+            self.assertEqual(platform.run_time(job), 5)
+            self.assertAlmostEqual(platform.cost(job), 4.0 * 20 / 2.0 / 3600)
+
+            platform.submit([job], 0)
+            platform.advance_to(0)
+            self.assertEqual(platform.free_nodes(), 1)
+            platform.advance_to(4)
+            self.assertEqual(platform.free_nodes(), 1)
+            platform.advance_to(5)
+            self.assertEqual(platform.free_nodes(), 2)
 
 
 if __name__ == "__main__":

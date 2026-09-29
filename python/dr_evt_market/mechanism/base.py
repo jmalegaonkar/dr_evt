@@ -30,19 +30,24 @@ class Mechanism(ABC):
         """Return the winning decisions in batch order."""
 
 
+def job_value(job, platform) -> float:
+    """Return a job's reported value on one platform."""
+    price = job.price(platform.name) or 0.0
+    seconds = job.requested_s or job.limit_s
+    speed = platform.job_speed(job) if isinstance(job.bid, dict) else 1.0
+    return price * job.num_nodes * seconds / speed / 3600
+
+
 def candidates(job, platforms, free_nodes) -> dict[str, tuple[float, float]]:
     """Return feasible platform offers as cost and value pairs."""
     offers = {}
     for name, platform in platforms.items():
         price = job.price(name)
-        if (
-            not platform.fits(job)
-            or price is None
-            or free_nodes[name] < job.num_nodes
-            or price + 1.0e-9 < platform.price_per_node_hour
-        ):
+        if not platform.fits(job) or price is None or free_nodes[name] < job.num_nodes:
             continue
         cost = platform.cost(job)
-        value = price * job.num_nodes * job.limit_s / 3600
+        value = job_value(job, platform)
+        if value + 1.0e-9 < cost:
+            continue
         offers[name] = (cost, value)
     return offers

@@ -18,6 +18,13 @@ from dr_evt_market.cli import main
 
 _DATA = Path(__file__).with_name("data")
 _REFERENCE_PRICE = 1.234
+_SPEEDS = {
+    "corona": {"cpu": 1.0, "gpu": 1.0},
+    "dane": {"cpu": 0.861},
+    "matrix": {"cpu": 2.574, "gpu": 3.695},
+    "tioga": {"cpu": 1.594, "gpu": 7.042},
+}
+_UNIT_SPEEDS = {name: {"cpu": 1.0, "gpu": 1.0} for name in _SPEEDS}
 
 
 class JobTests(unittest.TestCase):
@@ -228,6 +235,7 @@ class JobTests(unittest.TestCase):
             hours=0.05,
             seed=4,
             per_platform=("corona", "matrix"),
+            speeds=_SPEEDS,
         )
         again, _ = prepare(
             traces,
@@ -236,9 +244,10 @@ class JobTests(unittest.TestCase):
             hours=0.05,
             seed=4,
             per_platform=("corona", "matrix"),
+            speeds=_SPEEDS,
         )
         self.assertTrue(all(list(job.bid) == ["corona", "matrix"] for job in jobs))
-        self.assertEqual(jobs[0].bid, {"corona": 5.9795, "matrix": 6.1484})
+        self.assertEqual(jobs[0].bid, {"corona": 5.9795, "matrix": 15.826})
         self.assertEqual(jobs, again)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "mapped.csv"
@@ -273,12 +282,38 @@ class JobTests(unittest.TestCase):
             "seed": 4,
         }
         scalar, _ = prepare(traces, **options)
-        mapped, _ = prepare(traces, per_platform=("corona", "tioga"), **options)
+        mapped, _ = prepare(
+            traces,
+            per_platform=("corona", "tioga"),
+            speeds=_UNIT_SPEEDS,
+            **options,
+        )
         self.assertEqual(
             [job.bid for job in scalar],
             [job.bid["tioga"] for job in mapped],
         )
         self.assertTrue(any(job.bid["corona"] != job.bid["tioga"] for job in mapped))
+
+    def test_per_platform_persona_bids_scale_with_speed(self) -> None:
+        """Mapped persona bids include the selected hardware's speed."""
+        traces = {"tioga": _DATA / "trace.csv"}
+        options = {
+            "reference_price": _REFERENCE_PRICE,
+            "start": 1000,
+            "hours": 0.05,
+            "seed": 4,
+            "requires": "gpu",
+            "per_platform": ("corona", "dane", "matrix"),
+        }
+        unit, _ = prepare(traces, speeds=_UNIT_SPEEDS, **options)
+        scaled, _ = prepare(traces, speeds=_SPEEDS, **options)
+        self.assertEqual(unit[0].bid["corona"], scaled[0].bid["corona"])
+        self.assertNotIn("dane", scaled[0].bid)
+        self.assertAlmostEqual(
+            scaled[0].bid["matrix"] / unit[0].bid["matrix"],
+            _SPEEDS["matrix"]["gpu"],
+            places=3,
+        )
 
     def test_job_draws_follow_trace_row_identity(self) -> None:
         """Changing the interval does not change a retained row's draws."""

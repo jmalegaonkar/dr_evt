@@ -9,15 +9,16 @@ runs the resulting streams.
 
 `Platform` owns one in-process simulation. Its `share` sets `exposed_nodes` to the
 larger of one node and the rounded share of the real machine. Hardware tags determine
-whether a job fits, and the posted price determines its cost per node-hour.
+whether a job fits. Speed is relative to Quartz at 1.0 and selects the platform run
+time and priced reservation for that job's hardware.
 
-| Profile | Nodes | Price per node-hour | Hardware |
-|---|---:|---:|---|
-| Corona | 121 | 1.5 | CPU, GPU |
-| Dane | 1544 | 0.18 | CPU |
-| Matrix | 30 | 1.6 | CPU, GPU |
-| Tioga | 32 | 2.7 | CPU, GPU |
-| Tuolumne | 1152 | 0.19 | CPU, GPU |
+| Profile | Nodes | Price per node-hour | CPU speed | GPU speed | Hardware |
+|---|---:|---:|---:|---:|---|
+| Corona | 121 | 1.5 | 1.000 | 1.000 | CPU, GPU |
+| Dane | 1544 | 0.18 | 0.861 | | CPU |
+| Matrix | 30 | 1.6 | 2.574 | 3.695 | CPU, GPU |
+| Tioga | 32 | 2.7 | 1.594 | 7.042 | CPU, GPU |
+| Tuolumne | 1152 | 0.19 | 1.401 | 3.313 | CPU, GPU |
 
 These five profiles form the default federation. Hardware is intentionally limited to
 `cpu` and `gpu`: Dane is CPU-only, and every other profile accepts both.
@@ -30,9 +31,10 @@ persona. Required jobs-file columns are `job_id`, `job_submit_time`, `num_nodes`
 `time_limit`, and `bid`. Optional columns are `bid:<platform>`, `requires`, `runtime`,
 `requested`, `source`, `user`, and `persona`.
 
-Unknown columns are ignored. A scalar `bid` is a maximum price per node-hour on every
-platform. If any `bid:<platform>` cell is filled, only those named platforms are bid
-on and the scalar cell is ignored.
+Unknown columns are ignored. A scalar `bid` is a maximum price per reference node-hour
+on every platform. A `bid:<platform>` is a maximum price per node-hour on that
+platform. If any mapped bid cell is filled, only those named platforms are bid on and
+the scalar cell is ignored.
 
 Prepared rows form one anonymous stream. `source` remains a label for analysis; it
 does not select a platform or determine a job's hardware. The traces do not identify
@@ -40,11 +42,15 @@ GPU work, so each job requires `gpu` with probability 0.5 by default. The other 
 have no hardware requirement and can use a CPU. `--gpu-fraction` changes that
 probability, while `--requires` applies one requirement to the whole output file.
 
-For platform `p`, the public cost and reported value are:
+For platform `p`, let `speed(p)` select its GPU speed for a GPU job and its CPU speed
+otherwise, and let `requested` fall back to `limit` when the original request is not
+available. The platform holds the nodes for `max(1, ceil(limit / speed(p)))` seconds.
+Its cost and the two bid forms' values are:
 
 ```text
-cost(p)  = posted_price(p) * nodes * limit / 3600
-value(p) = bid_price(p)    * nodes * limit / 3600
+cost(p)         = posted_price(p) * nodes * requested / speed(p) / 3600
+scalar_value(p) = bid              * nodes * requested            / 3600
+mapped_value(p) = bid(p)           * nodes * requested / speed(p) / 3600
 ```
 
 By default, trace preparation anchors every synthetic private price on the mean posted
@@ -52,7 +58,8 @@ price of the five-profile default federation. A seed, source, and pseudonymous u
 select a persistent persona. The trace's job identifier, or its source and original
 file order when it has no identifier, controls each job's random draws. Generated job
 numbers therefore do not change those draws when the selected interval changes.
-Per-platform bids also apply a persistent user preference for each machine.
+Per-platform bids also apply a persistent user preference for each machine and scale
+the offered hourly price by that machine's speed for the job.
 
 | Persona | Share | Price per node-hour |
 |---|---:|---|
@@ -65,17 +72,17 @@ An urgent tier job occurs with probability 20 percent. A tier user is a heavy pr
 user with probability 20 percent. By default, preparation uses historical run time as
 the execution limit and carries the original requested limit in `requested`. With
 `--anchor home`, each source must name a profile and its posted price becomes the
-reference. A per-platform home entry then equals the persona price exactly, while user
-preferences adjust only the other entries.
+reference. A per-platform home entry uses no preference factor, while its speed still
+converts the persona price into that platform's hourly price.
 
 ## Mechanism and loop
 
 `candidates` keeps platforms that match the hardware, have enough free nodes, were
-bid on, and have a posted price no greater than the bid. `Vcg` maximizes total reported
+bid on, and have a reported value that covers cost. `Vcg` maximizes total reported
 value minus platform cost subject to one platform per job and node capacity. Its
 Clarke pivot is the second price generalized to several platforms with capacity. A job
-that bids exactly the posted price adds nothing to that total; it takes nodes the
-winners leave free, in queue order, and pays the posted price.
+whose reported value exactly covers cost adds nothing to that total; it takes nodes
+the winners leave free, in queue order, and pays the posted cost.
 
 VCG lets users keep the savings between their values and the charges above posted
 cost. Pay what you bid assigns offers greedily and gives that surplus to the center.
@@ -119,7 +126,7 @@ place every batch job that still fits the nodes left over, so a job waits only w
 platform has room for it; anything else raises `MarketError`. The market's guarantee is
 that every accepted winner starts in its market window. Per-job begin and end are
 recorded by the market from that guarantee, not read from `dr_evt`, and streamed jobs
-run their limit.
+run their speed-adjusted limit.
 
 ## Outputs
 

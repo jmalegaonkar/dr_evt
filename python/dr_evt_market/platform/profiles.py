@@ -11,6 +11,12 @@ from pathlib import Path
 
 from .base import Platform
 
+# Speeds were derived on 2026-09-28 from ranks == 1 rows by removing the
+# "(via quartz)" marks, taking each platform column's median relative run time,
+# and using its reciprocal. The sample has 635 rows across 8 applications.
+# Corona has no matrix row and uses 1.0. Dane's CPU values are bimodal, so its
+# median-based speed is sensitive to the aggregation rule.
+
 
 class Corona(Platform):
     """The Corona GPU platform profile."""
@@ -19,6 +25,7 @@ class Corona(Platform):
     total_nodes = 121
     price_per_node_hour = 1.5
     hardware = frozenset({"cpu", "gpu"})
+    speed = {"cpu": 1.0, "gpu": 1.0}
 
 
 class Dane(Platform):
@@ -28,6 +35,7 @@ class Dane(Platform):
     total_nodes = 1544
     price_per_node_hour = 0.18
     hardware = frozenset({"cpu"})
+    speed = {"cpu": 0.861}
 
 
 class Matrix(Platform):
@@ -37,6 +45,7 @@ class Matrix(Platform):
     total_nodes = 30
     price_per_node_hour = 1.6
     hardware = frozenset({"cpu", "gpu"})
+    speed = {"cpu": 2.574, "gpu": 3.695}
 
 
 class Tioga(Platform):
@@ -46,6 +55,7 @@ class Tioga(Platform):
     total_nodes = 32
     price_per_node_hour = 2.7
     hardware = frozenset({"cpu", "gpu"})
+    speed = {"cpu": 1.594, "gpu": 7.042}
 
 
 class Tuolumne(Platform):
@@ -55,6 +65,7 @@ class Tuolumne(Platform):
     total_nodes = 1152
     price_per_node_hour = 0.19
     hardware = frozenset({"cpu", "gpu"})
+    speed = {"cpu": 1.401, "gpu": 3.313}
 
 
 PLATFORMS = (Corona, Dane, Matrix, Tioga, Tuolumne)

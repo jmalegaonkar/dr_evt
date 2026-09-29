@@ -7,6 +7,7 @@
 
 """One real machine exposing a share of itself as a DR_EVT simulation."""
 
+import math
 from numbers import Real
 from pathlib import Path
 
@@ -34,6 +35,7 @@ class Platform:
     total_nodes: int
     price_per_node_hour: float
     hardware: frozenset[str]
+    speed: dict[str, float]
 
     def __init__(self, work_dir: str | Path, share: float = 1.0) -> None:
         """Create the platform's header file and streaming simulation."""
@@ -68,9 +70,25 @@ class Platform:
         """Return whether a job's hardware and node demand fit this platform."""
         return job.requires <= self.hardware and job.num_nodes <= self.exposed_nodes
 
+    def job_speed(self, job) -> float:
+        """Return this platform's speed for a job's hardware."""
+        hardware = "gpu" if "gpu" in job.requires else "cpu"
+        return self.speed[hardware]
+
+    def run_time(self, job) -> int:
+        """Return the integer time for which this job holds nodes."""
+        return max(1, math.ceil(job.limit_s / self.job_speed(job)))
+
     def cost(self, job) -> float:
-        """Return the platform cost of running a job for its time limit."""
-        return self.price_per_node_hour * job.num_nodes * job.limit_s / 3600
+        """Return the platform cost of the job's priced reservation."""
+        seconds = job.requested_s or job.limit_s
+        return (
+            self.price_per_node_hour
+            * job.num_nodes
+            * seconds
+            / self.job_speed(job)
+            / 3600
+        )
 
     def advance_to(self, time_s: int) -> None:
         """Advance the simulation to a nondecreasing integer time."""
@@ -92,7 +110,9 @@ class Platform:
     def submit(self, jobs, time_s: int) -> list[int]:
         """Submit jobs at one time in their given order and return their IDs."""
         requests = [
-            self._dr_evt.JobAppendRequest(time_s, job.num_nodes, "1", job.limit_s)
+            self._dr_evt.JobAppendRequest(
+                time_s, job.num_nodes, "1", self.run_time(job)
+            )
             for job in jobs
         ]
         if not requests:

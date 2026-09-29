@@ -9,6 +9,7 @@
 
 import collections
 import json
+import math
 import os
 import subprocess
 import sys
@@ -85,7 +86,7 @@ class MarketTests(unittest.TestCase):
         )
         self.assertEqual(
             [row.job_id for row in result.routed if row.window == 0],
-            ["j000001", "j000004", "j000005"],
+            ["j000001", "j000002", "j000003", "j000005"],
         )
         self.assertEqual(
             {row.platform for row in result.routed},
@@ -93,7 +94,13 @@ class MarketTests(unittest.TestCase):
         )
         for row in result.routed:
             self.assertEqual(row.begin_s, row.window_s)
-            self.assertEqual(row.end_s, row.begin_s + by_id[row.job_id].limit_s)
+            job = by_id[row.job_id]
+            hardware = "gpu" if "gpu" in job.requires else "cpu"
+            speed = result.configuration["platforms"][row.platform]["speed"][hardware]
+            self.assertEqual(
+                row.end_s,
+                row.begin_s + max(1, math.ceil(job.limit_s / speed)),
+            )
         self.assertTrue(
             any(row.begin_s > row.submit_s for row in result.routed),
             "the contended fixture must make at least one job wait",
@@ -108,7 +115,7 @@ class MarketTests(unittest.TestCase):
         # This changes only when the fixture or the model changes.
         self.assertEqual(
             outputs["sha256"],
-            "d6d2f7395217174fef5757171498d3876bcf04c279b5f908493d82dfc72689c5",
+            "c5674817ef2b7ffcb48b57976686c205341138781961670561adecc175a269a0",
         )
 
     def test_routed_output_is_byte_identical(self) -> None:
@@ -209,7 +216,7 @@ class MarketTests(unittest.TestCase):
             self.assertIn("waiting=2", completed.stdout.splitlines())
             self.assertIn(
                 "routed_sha256="
-                "d6d2f7395217174fef5757171498d3876bcf04c279b5f908493d82dfc72689c5",
+                "c5674817ef2b7ffcb48b57976686c205341138781961670561adecc175a269a0",
                 completed.stdout.splitlines(),
             )
             first_price = subprocess.run(

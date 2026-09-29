@@ -11,7 +11,7 @@ import itertools
 import random
 import tempfile
 import unittest
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from unittest import mock
 
 from dr_evt_market import Decision, FirstPrice, Job, Vcg, candidates, federation
@@ -25,12 +25,24 @@ class _Platform:
     exposed_nodes: int
     price_per_node_hour: float
     hardware: frozenset[str]
+    speed: dict[str, float] = field(default_factory=lambda: {"cpu": 1.0, "gpu": 1.0})
 
     def fits(self, job) -> bool:
         return job.requires <= self.hardware and job.num_nodes <= self.exposed_nodes
 
+    def job_speed(self, job) -> float:
+        hardware = "gpu" if "gpu" in job.requires else "cpu"
+        return self.speed[hardware]
+
     def cost(self, job) -> float:
-        return self.price_per_node_hour * job.num_nodes * job.limit_s / 3600
+        seconds = job.requested_s or job.limit_s
+        return (
+            self.price_per_node_hour
+            * job.num_nodes
+            * seconds
+            / self.job_speed(job)
+            / 3600
+        )
 
 
 def _instances(count=30):
@@ -115,7 +127,10 @@ def _brute(jobs, platforms, free_nodes, excluded=None):
 
 
 def _value(job, platform, platforms):
-    return job.price(platform) * job.num_nodes * job.limit_s / 3600
+    selected = platforms[platform]
+    seconds = job.requested_s or job.limit_s
+    speed = selected.job_speed(job) if isinstance(job.bid, dict) else 1.0
+    return job.price(platform) * job.num_nodes * seconds / speed / 3600
 
 
 class AuctionTests(unittest.TestCase):
@@ -132,7 +147,7 @@ class AuctionTests(unittest.TestCase):
             offers = candidates(scalar, platforms, free)
             self.assertEqual(list(offers), ["corona", "tuolumne"])
             self.assertEqual(offers["corona"], (0.6, 1.2))
-            self.assertAlmostEqual(offers["tuolumne"][0], 0.076)
+            self.assertAlmostEqual(offers["tuolumne"][0], 0.076 / 3.313)
             self.assertEqual(offers["tuolumne"][1], 1.2)
             mapped = Job(
                 "mapped",
@@ -150,6 +165,30 @@ class AuctionTests(unittest.TestCase):
             self.assertEqual(
                 list(candidates(mapped, platforms, free)), ["tioga", "tuolumne"]
             )
+
+    def test_single_bid_value_is_independent_of_platform_speed(self) -> None:
+        """A scalar bid values the same reference work on every platform."""
+        platforms = {
+            "slow": _Platform(
+                "slow",
+                2,
+                1.0,
+                frozenset({"cpu"}),
+                {"cpu": 1.0},
+            ),
+            "fast": _Platform(
+                "fast",
+                2,
+                1.0,
+                frozenset({"cpu"}),
+                {"cpu": 2.0},
+            ),
+        }
+        job = Job("scalar", 0, 1, 3600, 3.0, requested_s=7200)
+        offers = candidates(job, platforms, {"slow": 2, "fast": 2})
+        self.assertEqual(offers["slow"][1], 6.0)
+        self.assertEqual(offers["fast"][1], 6.0)
+        self.assertEqual(offers["slow"][0], 2.0 * offers["fast"][0])
 
     def test_vcg_matches_brute_force(self) -> None:
         """The optimizer and pivot charges match exhaustive search."""

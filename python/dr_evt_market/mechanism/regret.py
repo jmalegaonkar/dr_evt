@@ -15,6 +15,8 @@ lower bound on the regret.
 
 from dataclasses import dataclass, replace
 
+from .base import job_value
+
 _CHUNK = 512
 
 
@@ -27,8 +29,15 @@ class Estimates:
     gradient: float
 
 
-def _prices(job, names):
-    return [job.price(name) or 0.0 for name in names]
+def _prices(job, names, platforms):
+    prices = [job.price(name) or 0.0 for name in names]
+    if isinstance(job.bid, dict):
+        return prices
+    hardware = "gpu" if "gpu" in job.requires else "cpu"
+    return [
+        price * platforms[name].speed.get(hardware, 1.0)
+        for name, price in zip(names, prices)
+    ]
 
 
 def _misreports(prices, posted, points, span):
@@ -46,11 +55,10 @@ def _misreports(prices, posted, points, span):
     return variants
 
 
-def _utility(job, decisions):
+def _utility(job, decisions, platforms):
     for decision in decisions:
         if decision.job_id == job.job_id:
-            price = job.price(decision.platform) or 0.0
-            return price * job.num_nodes * job.limit_s / 3600 - decision.charge
+            return job_value(job, platforms[decision.platform]) - decision.charge
     return 0.0
 
 
@@ -68,13 +76,15 @@ def grid_regret(mechanism, jobs, platforms, free_nodes, *, points=101, span=4.0)
     truthful = mechanism.decide(jobs, platforms, free_nodes)
     regret = {}
     for index, job in enumerate(jobs):
-        truth = _utility(job, truthful)
+        truth = _utility(job, truthful, platforms)
         best = truth
-        for _, prices in _misreports(_prices(job, names), posted, points, span):
+        for _, prices in _misreports(
+            _prices(job, names, platforms), posted, points, span
+        ):
             report = replace(job, bid=dict(zip(names, prices)))
             reports = jobs[:index] + [report] + jobs[index + 1 :]
             decisions = mechanism.decide(reports, platforms, free_nodes)
-            best = max(best, _utility(job, decisions))
+            best = max(best, _utility(job, decisions, platforms))
         regret[job.job_id] = best - truth
     return regret
 
@@ -113,8 +123,8 @@ def refined_regret(
     net = mechanism.net
     base = learned.window([(jobs, free_nodes)], platforms)
     truth = base.prices[0]
-    work = (base.nodes * base.hours)[0]
-    cost = base.posted[0] * work[:, None]
+    true_value = base.value(base.prices)[0]
+    cost = base.cost()[0]
     size, width = truth.shape
     top = truth.max(dim=1).values
     generator = torch.Generator().manual_seed(seed)
@@ -129,28 +139,31 @@ def refined_regret(
         for first in range(0, len(rows), _CHUNK):
             part, offered = rows[first : first + _CHUNK], prices[first : first + _CHUNK]
             window = base.repeat(len(part))
-            assignment, fractions = learned.deploy(net, window, reports(part, offered))
+            reported = reports(part, offered)
+            assignment, fractions = learned.deploy(net, window, reported)
+            reported_value = window.value(reported)
             index = np.arange(len(part))
             placed = torch.as_tensor(assignment[index, part])
             column = placed.clamp(min=0)
             job = torch.as_tensor(part)
             fraction = torch.as_tensor(fractions[index, part])
             charged = cost[job, column] + fraction * (
-                offered[torch.arange(len(part)), column] * work[job] - cost[job, column]
+                reported_value[torch.arange(len(part)), job, column] - cost[job, column]
             )
-            gain = truth[job, column] * work[job] - charged
+            gain = true_value[job, column] - charged
             utilities.append(torch.where(placed >= 0, gain, torch.zeros_like(gain)))
         return torch.cat(utilities)
 
     def relaxed(rows, prices):
         window = base.repeat(len(rows))
-        channels, candidate = window.features(reports(rows, prices))
+        reported = reports(rows, prices)
+        channels, candidate = window.features(reported)
         probabilities, fractions = net(channels, candidate, window.jobs)
         index, job = torch.arange(len(rows)), torch.as_tensor(rows)
         charged = cost[job] + fractions[index, job, None] * (
-            prices * work[job, None] - cost[job]
+            window.value(reported)[index, job] - cost[job]
         )
-        gain = truth[job] * work[job, None] - charged
+        gain = true_value[job] - charged
         return (probabilities[index, job, :width] * gain).sum(-1)
 
     def ascend(rows, start, count):

@@ -143,12 +143,15 @@ def _prepare(args):
             raise ValueError(f"unknown platform {unknown!r}")
         home_prices = {name: _PROFILES[name].price_per_node_hour for name in traces}
     per_platform = None
+    speeds = None
     if args.per_platform is not None:
         per_platform = _names(args.per_platform)
+        speeds = {name: _PROFILES[name].speed for name in per_platform}
     jobs, summary = prepare(
         traces,
         reference_price=_DEFAULT_REFERENCE_PRICE,
         home_prices=home_prices,
+        speeds=speeds,
         anchor=args.anchor,
         trace_format=args.format,
         start=args.start,

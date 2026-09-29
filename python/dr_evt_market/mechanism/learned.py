@@ -26,6 +26,7 @@ class Window:
     hours: torch.Tensor  # [B, N] limit per job in hours
     prices: torch.Tensor  # [B, N, M] reported price per node-hour, zero if none
     posted: torch.Tensor  # [B, M] posted price per node-hour
+    speeds: torch.Tensor  # [B, N, M] platform speed for each job
     fits: torch.Tensor  # [B, N, M] hardware and exposed nodes fit
     free: torch.Tensor  # [B, M] free nodes
     exposed: torch.Tensor  # [B, M] exposed nodes
@@ -49,18 +50,20 @@ class Window:
 
     def cost(self) -> torch.Tensor:
         """Return the posted cost of every job on every platform."""
-        return self.posted.unsqueeze(1) * (self.nodes * self.hours).unsqueeze(-1)
+        work = (self.nodes * self.hours).unsqueeze(-1) / self.speeds
+        return self.posted.unsqueeze(1) * work
 
     def value(self, prices: torch.Tensor) -> torch.Tensor:
         """Return the value of every job on every platform at the given prices."""
-        return prices * (self.nodes * self.hours).unsqueeze(-1)
+        work = (self.nodes * self.hours).unsqueeze(-1) / self.speeds
+        return prices * work
 
     def candidates(self, prices: torch.Tensor) -> torch.Tensor:
         """Return the cells that fit now and whose price covers the posted price."""
         return (
             self.fits
             & (self.nodes.unsqueeze(-1) <= self.free.unsqueeze(1))
-            & (prices + _TOLERANCE >= self.posted.unsqueeze(1))
+            & (self.value(prices) + _TOLERANCE >= self.cost())
         )
 
     def features(self, prices: torch.Tensor):
@@ -88,16 +91,24 @@ def window(batches, platforms) -> Window:
     nodes = torch.zeros(shape, dtype=torch.float64)
     hours = torch.zeros(shape, dtype=torch.float64)
     prices = torch.zeros(shape + (len(names),), dtype=torch.float64)
+    speeds = torch.ones(shape + (len(names),), dtype=torch.float64)
     fits = torch.zeros(shape + (len(names),), dtype=torch.bool)
     present = torch.zeros(shape, dtype=torch.bool)
     for row, (jobs, _) in enumerate(batches):
         present[row, : len(jobs)] = True
         for column, job in enumerate(jobs):
             nodes[row, column] = job.num_nodes
-            hours[row, column] = job.limit_s / 3600
+            hours[row, column] = (job.requested_s or job.limit_s) / 3600
+            hardware = "gpu" if "gpu" in job.requires else "cpu"
             for index, name in enumerate(names):
-                prices[row, column, index] = job.price(name) or 0.0
-                fits[row, column, index] = platforms[name].fits(job)
+                platform = platforms[name]
+                speed = platform.speed.get(hardware, 1.0)
+                price = job.price(name) or 0.0
+                speeds[row, column, index] = speed
+                prices[row, column, index] = (
+                    price if isinstance(job.bid, dict) else price * speed
+                )
+                fits[row, column, index] = platform.fits(job)
     posted = [platforms[name].price_per_node_hour for name in names]
     exposed = [platforms[name].exposed_nodes for name in names]
     return Window(
@@ -105,6 +116,7 @@ def window(batches, platforms) -> Window:
         hours,
         prices,
         torch.tensor([posted] * len(batches), dtype=torch.float64),
+        speeds,
         fits,
         torch.tensor(
             [[free[name] for name in names] for _, free in batches],
