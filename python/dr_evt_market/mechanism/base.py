@@ -33,9 +33,8 @@ class Mechanism(ABC):
 def job_value(job, platform) -> float:
     """Return a job's reported value on one platform."""
     price = job.price(platform.name) or 0.0
-    seconds = job.requested_s or job.limit_s
     speed = platform.job_speed(job) if isinstance(job.bid, dict) else 1.0
-    return price * job.num_nodes * seconds / speed / 3600
+    return price * job.num_nodes * job.limit_s / speed / 3600
 
 
 def candidates(job, platforms, free_nodes) -> dict[str, tuple[float, float]]:

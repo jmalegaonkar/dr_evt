@@ -173,13 +173,13 @@ class PlatformTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 federation(directory, names=("unknown",))
 
-    def test_speed_halves_run_time_and_priced_reservation(self) -> None:
-        """Speed two halves both node occupancy and reservation cost."""
+    def test_speed_halves_run_time_and_runtime_cost(self) -> None:
+        """Speed two halves both node occupancy and run-time cost."""
         with tempfile.TemporaryDirectory() as directory:
             platform = _TwiceAsFast(directory)
             job = _job(1, 10, "gpu", requested_s=20)
             self.assertEqual(platform.run_time(job), 5)
-            self.assertAlmostEqual(platform.cost(job), 4.0 * 20 / 2.0 / 3600)
+            self.assertAlmostEqual(platform.cost(job), 4.0 * 10 / 2.0 / 3600)
 
             platform.submit([job], 0)
             platform.advance_to(0)

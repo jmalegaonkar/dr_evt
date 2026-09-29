@@ -98,7 +98,7 @@ def window(batches, platforms) -> Window:
         present[row, : len(jobs)] = True
         for column, job in enumerate(jobs):
             nodes[row, column] = job.num_nodes
-            hours[row, column] = (job.requested_s or job.limit_s) / 3600
+            hours[row, column] = job.limit_s / 3600
             hardware = "gpu" if "gpu" in job.requires else "cpu"
             for index, name in enumerate(names):
                 platform = platforms[name]

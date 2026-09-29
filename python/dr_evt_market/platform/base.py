@@ -81,11 +81,10 @@ class Platform:
 
     def cost(self, job) -> float:
         """Return the platform cost of the job's priced reservation."""
-        seconds = job.requested_s or job.limit_s
         return (
             self.price_per_node_hour
             * job.num_nodes
-            * seconds
+            * job.limit_s
             / self.job_speed(job)
             / 3600
         )

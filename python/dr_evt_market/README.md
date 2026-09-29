@@ -43,14 +43,13 @@ have no hardware requirement and can use a CPU. `--gpu-fraction` changes that
 probability, while `--requires` applies one requirement to the whole output file.
 
 For platform `p`, let `speed(p)` select its GPU speed for a GPU job and its CPU speed
-otherwise, and let `requested` fall back to `limit` when the original request is not
-available. The platform holds the nodes for `max(1, ceil(limit / speed(p)))` seconds.
+otherwise. The platform holds the nodes for `max(1, ceil(limit / speed(p)))` seconds.
 Its cost and the two bid forms' values are:
 
 ```text
-cost(p)         = posted_price(p) * nodes * requested / speed(p) / 3600
-scalar_value(p) = bid              * nodes * requested            / 3600
-mapped_value(p) = bid(p)           * nodes * requested / speed(p) / 3600
+cost(p)         = posted_price(p) * nodes * limit / speed(p) / 3600
+scalar_value(p) = bid              * nodes * limit            / 3600
+mapped_value(p) = bid(p)           * nodes * limit / speed(p) / 3600
 ```
 
 By default, trace preparation anchors every synthetic private price on the mean posted
@@ -70,10 +69,11 @@ the offered hourly price by that machine's speed for the job.
 
 An urgent tier job occurs with probability 20 percent. A tier user is a heavy premium
 user with probability 20 percent. By default, preparation uses historical run time as
-the execution limit and carries the original requested limit in `requested`. With
-`--anchor home`, each source must name a profile and its posted price becomes the
-reference. A per-platform home entry uses no preference factor, while its speed still
-converts the persona price into that platform's hourly price.
+the execution limit. A job is priced, released and valued on that run time, so users
+pay for what they use; the original requested limit is carried in `requested` but
+otherwise unused. With `--anchor home`, each source must name a profile and its posted
+price becomes the reference. A per-platform home entry uses no preference factor,
+while its speed still converts the persona price into that platform's hourly price.
 
 ## Mechanism and loop
 

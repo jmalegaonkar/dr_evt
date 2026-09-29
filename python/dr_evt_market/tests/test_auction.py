@@ -35,11 +35,10 @@ class _Platform:
         return self.speed[hardware]
 
     def cost(self, job) -> float:
-        seconds = job.requested_s or job.limit_s
         return (
             self.price_per_node_hour
             * job.num_nodes
-            * seconds
+            * job.limit_s
             / self.job_speed(job)
             / 3600
         )
@@ -128,9 +127,8 @@ def _brute(jobs, platforms, free_nodes, excluded=None):
 
 def _value(job, platform, platforms):
     selected = platforms[platform]
-    seconds = job.requested_s or job.limit_s
     speed = selected.job_speed(job) if isinstance(job.bid, dict) else 1.0
-    return job.price(platform) * job.num_nodes * seconds / speed / 3600
+    return job.price(platform) * job.num_nodes * job.limit_s / speed / 3600
 
 
 class AuctionTests(unittest.TestCase):
@@ -186,8 +184,8 @@ class AuctionTests(unittest.TestCase):
         }
         job = Job("scalar", 0, 1, 3600, 3.0, requested_s=7200)
         offers = candidates(job, platforms, {"slow": 2, "fast": 2})
-        self.assertEqual(offers["slow"][1], 6.0)
-        self.assertEqual(offers["fast"][1], 6.0)
+        self.assertEqual(offers["slow"][1], 3.0)
+        self.assertEqual(offers["fast"][1], 3.0)
         self.assertEqual(offers["slow"][0], 2.0 * offers["fast"][0])
 
     def test_vcg_matches_brute_force(self) -> None:

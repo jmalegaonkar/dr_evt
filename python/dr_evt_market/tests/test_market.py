@@ -115,7 +115,7 @@ class MarketTests(unittest.TestCase):
         # This changes only when the fixture or the model changes.
         self.assertEqual(
             outputs["sha256"],
-            "c5674817ef2b7ffcb48b57976686c205341138781961670561adecc175a269a0",
+            "8f63322a780326174b55220d7d0695cf35017ec7ab658112e433495acc204f8b",
         )
 
     def test_routed_output_is_byte_identical(self) -> None:
@@ -216,7 +216,7 @@ class MarketTests(unittest.TestCase):
             self.assertIn("waiting=2", completed.stdout.splitlines())
             self.assertIn(
                 "routed_sha256="
-                "c5674817ef2b7ffcb48b57976686c205341138781961670561adecc175a269a0",
+                "8f63322a780326174b55220d7d0695cf35017ec7ab658112e433495acc204f8b",
                 completed.stdout.splitlines(),
             )
             first_price = subprocess.run(
