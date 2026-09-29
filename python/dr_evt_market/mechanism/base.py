@@ -29,6 +29,10 @@ class Mechanism(ABC):
     def decide(self, jobs, platforms, free_nodes) -> list[Decision]:
         """Return the winning decisions in batch order."""
 
+    def offers(self, job, platforms, free_nodes):
+        """Return platforms that may serve a job and their charge bounds."""
+        return candidates(job, platforms, free_nodes)
+
 
 def job_value(job, platform) -> float:
     """Return a job's reported value on one platform."""

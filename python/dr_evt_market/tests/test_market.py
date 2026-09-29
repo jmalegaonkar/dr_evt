@@ -18,8 +18,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from dr_evt_market.cli import _parser
 from dr_evt_market import (
     Decision,
+    FirstFit,
     FirstPrice,
     Job,
     MarketError,
@@ -71,6 +73,30 @@ class MarketTests(unittest.TestCase):
         platforms = federation(root / "platforms", share=0.1)
         result = run(jobs, platforms, Vcg(), window_s=60, prefix=prefix)
         return jobs, result
+
+    def test_command_line_parses_a_share_per_platform(self) -> None:
+        """The share option accepts a comma-separated platform mapping."""
+        arguments = _parser().parse_args(
+            [
+                "run",
+                "--jobs",
+                "jobs.csv",
+                "--out",
+                "results",
+                "--share",
+                "corona=0.2,dane=0.5,matrix=0.5,tioga=0.5,tuolumne=0.05",
+            ]
+        )
+        self.assertEqual(
+            arguments.share,
+            {
+                "corona": 0.2,
+                "dane": 0.5,
+                "matrix": 0.5,
+                "tioga": 0.5,
+                "tuolumne": 0.05,
+            },
+        )
 
     def test_fixture_routes_at_windows_and_keeps_two_waiting(self) -> None:
         """The fixture routes eighteen jobs; the two that cannot run still wait."""
@@ -248,6 +274,26 @@ class MarketTests(unittest.TestCase):
         self.assertAlmostEqual(
             summary["revenue"], sum(row.value for row in result.routed)
         )
+
+    def test_first_fit_routes_every_fixture_job_that_vcg_routes(self) -> None:
+        """The no-market baseline covers every fixture winner under VCG."""
+        jobs = read_jobs(_DATA / "jobs.csv")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vcg = run(
+                jobs,
+                federation(root / "vcg", share=0.1),
+                Vcg(),
+            )
+            first_fit = run(
+                jobs,
+                federation(root / "firstfit", share=0.1),
+                FirstFit(),
+            )
+        vcg_jobs = {row.job_id for row in vcg.routed}
+        first_fit_jobs = {row.job_id for row in first_fit.routed}
+        self.assertLessEqual(vcg_jobs, first_fit_jobs)
+        self.assertIn("j000015", first_fit_jobs)
 
     def test_command_line_runs_and_prepares(self) -> None:
         """The command line runs the fixture and prepares two trace sources."""

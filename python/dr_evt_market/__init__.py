@@ -11,6 +11,7 @@ from .jobs import Job, prepare, read_jobs, write_jobs
 from .market import MarketError, Result, RoutedJob, Waiting, run, write_outputs
 from .mechanism import (
     Decision,
+    FirstFit,
     FirstPrice,
     MECHANISMS,
     Mechanism,
@@ -39,6 +40,7 @@ __all__ = [
     "Dane",
     "DEFAULT_FEDERATION",
     "Decision",
+    "FirstFit",
     "FirstPrice",
     "Job",
     "Matrix",

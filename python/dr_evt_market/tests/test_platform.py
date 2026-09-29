@@ -173,6 +173,19 @@ class PlatformTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 federation(directory, names=("unknown",))
 
+    def test_federation_accepts_a_share_per_platform(self) -> None:
+        """A share mapping sizes named platforms and defaults missing ones."""
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(
+                directory,
+                share={"corona": 0.2, "dane": 0.5},
+                names=("corona", "dane", "matrix"),
+            )
+        self.assertEqual(
+            {name: platform.exposed_nodes for name, platform in platforms.items()},
+            {"corona": 24, "dane": 772, "matrix": 30},
+        )
+
     def test_speed_halves_run_time_and_runtime_cost(self) -> None:
         """Speed two halves both node occupancy and run-time cost."""
         with tempfile.TemporaryDirectory() as directory:

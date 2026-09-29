@@ -7,6 +7,7 @@
 
 """The named machines, their federation, and how to build one."""
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from .base import Platform
@@ -76,7 +77,13 @@ _PROFILES = {profile.name: profile for profile in PLATFORMS}
 def federation(work_dir, share=1.0, names=DEFAULT_FEDERATION) -> dict[str, Platform]:
     """Build the selected named platforms in the requested order."""
     root = Path(work_dir)
+    mapped = isinstance(share, Mapping)
     try:
-        return {name: _PROFILES[name](root / name, share) for name in names}
+        return {
+            name: _PROFILES[name](
+                root / name, share.get(name, 1.0) if mapped else share
+            )
+            for name in names
+        }
     except KeyError as error:
         raise ValueError(f"unknown platform {error.args[0]!r}") from None

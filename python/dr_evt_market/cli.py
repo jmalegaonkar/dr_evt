@@ -23,6 +23,26 @@ _DEFAULT_REFERENCE_PRICE = sum(
 ) / len(DEFAULT_FEDERATION)
 
 
+def _share(value):
+    """Parse one federation share or a share for each named platform."""
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    shares = {}
+    for item in value.split(","):
+        name, separator, raw_share = item.partition("=")
+        if not separator or name not in _PROFILES:
+            raise argparse.ArgumentTypeError(f"invalid platform share {item!r}")
+        try:
+            shares[name] = float(raw_share)
+        except ValueError as error:
+            raise argparse.ArgumentTypeError(
+                f"invalid platform share {item!r}"
+            ) from error
+    return shares
+
+
 def _parser():
     parser = argparse.ArgumentParser(prog="dr_evt_market")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -30,7 +50,7 @@ def _parser():
     run_parser = commands.add_parser("run", help="run a market")
     run_parser.add_argument("--jobs", required=True, type=Path)
     run_parser.add_argument("--out", required=True, type=Path)
-    run_parser.add_argument("--share", type=float, default=1.0)
+    run_parser.add_argument("--share", type=_share, default=1.0)
     run_parser.add_argument("--prefix", type=int, default=32)
     run_parser.add_argument("--window", type=int, default=60)
     run_parser.add_argument("--mechanism", choices=MECHANISMS, default="vcg")
@@ -40,7 +60,7 @@ def _parser():
     train_parser = commands.add_parser("train", help="train RegretFormer")
     train_parser.add_argument("--jobs", required=True, type=Path)
     train_parser.add_argument("--out", required=True, type=Path)
-    train_parser.add_argument("--share", type=float, default=1.0)
+    train_parser.add_argument("--share", type=_share, default=1.0)
     train_parser.add_argument("--prefix", type=int, default=32)
     train_parser.add_argument("--window", type=int, default=60)
     train_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))

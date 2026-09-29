@@ -88,6 +88,12 @@ VCG lets users keep the savings between their values and the charges above poste
 cost. Pay what you bid assigns offers greedily and gives that surplus to the center.
 Both mechanisms report welfare and revenue through the same market outputs.
 
+`FirstFit` is the no-market baseline over the same federation slices and market loop.
+It ignores bids and visits batch jobs in arrival order, placing each on the available
+platform with the lowest posted cost for that job, including speed, and charging that
+cost. Comparisons therefore change the allocation rule without changing capacity or
+the workload.
+
 `RegretFormer` is a learned mechanism: the network of Ivanov et al. (NeurIPS 2022) over
 a grid of jobs by platforms. For each job it gives a probability for every candidate
 platform and for waiting, and a payment fraction. The market takes the most probable
@@ -157,9 +163,13 @@ python -m dr_evt_market run --jobs jobs.csv --out results --share 0.1 \
   --platforms corona,dane,matrix,tioga,tuolumne
 ```
 
-`--mechanism` is `vcg` (the default), `firstprice` for pay what you bid, or
-`regretformer` with `--checkpoint PATH` for a saved network. To train one, record the
-windows of a VCG run on the same jobs and federation and train on them:
+`--share` accepts one fraction for every platform or a comma-separated mapping such as
+`corona=0.2,dane=0.5,matrix=0.5,tioga=0.5,tuolumne=0.05`; omitted names use `1.0`.
+
+`--mechanism` is `vcg` (the default), `firstprice` for pay what you bid, `firstfit` for
+the bid-blind no-market baseline, or `regretformer` with `--checkpoint PATH` for a saved
+network. To train one, record the windows of a VCG run on the same jobs and federation
+and train on them:
 
 ```bash
 python -m dr_evt_market train --jobs jobs.csv --out network.pt --share 0.2 \

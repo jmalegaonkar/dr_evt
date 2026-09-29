@@ -14,7 +14,15 @@ import unittest
 from dataclasses import dataclass, field, replace
 from unittest import mock
 
-from dr_evt_market import Decision, FirstPrice, Job, Vcg, candidates, federation
+from dr_evt_market import (
+    Decision,
+    FirstFit,
+    FirstPrice,
+    Job,
+    Vcg,
+    candidates,
+    federation,
+)
 
 _TIE_BREAK = 1.0e-9
 
@@ -133,6 +141,34 @@ def _value(job, platform, platforms):
 
 class AuctionTests(unittest.TestCase):
     """Check candidate construction, allocation and Clarke payments."""
+
+    def test_first_fit_ignores_bids_and_charges_posted_cost(self) -> None:
+        """First-fit chooses by posted cost and never by the bid."""
+        platforms = {
+            "slow": _Platform("slow", 2, 1.0, frozenset({"cpu"}), {"cpu": 0.5}),
+            "fast": _Platform("fast", 2, 1.5, frozenset({"cpu"}), {"cpu": 2.0}),
+        }
+        job = Job("job", 0, 1, 3600, 0.0)
+        low = FirstFit().decide([job], platforms, {"slow": 2, "fast": 2})
+        high = FirstFit().decide(
+            [replace(job, bid=100.0)], platforms, {"slow": 2, "fast": 2}
+        )
+        self.assertEqual(low, high)
+        self.assertEqual(low[0].platform, "fast")
+        self.assertEqual(low[0].charge, platforms["fast"].cost(job))
+
+    def test_first_fit_respects_capacity(self) -> None:
+        """First-fit uses each platform's remaining nodes."""
+        platforms = {
+            "cheap": _Platform("cheap", 2, 1.0, frozenset({"cpu"})),
+            "dear": _Platform("dear", 2, 2.0, frozenset({"cpu"})),
+        }
+        jobs = [Job(f"j{index}", 0, 2, 60, 0.0) for index in range(3)]
+        decisions = FirstFit().decide(jobs, platforms, {"cheap": 2, "dear": 2})
+        self.assertEqual(
+            [(item.job_id, item.platform) for item in decisions],
+            [("j0", "cheap"), ("j1", "dear")],
+        )
 
     def test_candidates_support_both_bid_forms(self) -> None:
         """Candidates respect fit, capacity, value and mapped omissions."""

@@ -13,7 +13,8 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .mechanism import Decision, Mechanism, candidates
+from .mechanism import Decision, Mechanism
+from .mechanism.base import job_value
 
 _TOLERANCE = 1.0e-9
 _ROUTED_FIELDS = (
@@ -91,7 +92,9 @@ class MarketError(RuntimeError):
     """A mechanism or platform violated the market's placement guarantee."""
 
 
-def _check_decisions(batch, platforms, free_nodes, decisions: list[Decision]):
+def _check_decisions(
+    batch, platforms, free_nodes, mechanism, decisions: list[Decision]
+):
     batch_by_id = {job.job_id: job for job in batch}
     seen = set()
     used = {name: 0 for name in platforms}
@@ -103,11 +106,12 @@ def _check_decisions(batch, platforms, free_nodes, decisions: list[Decision]):
         job = batch_by_id.get(decision.job_id)
         if job is None:
             raise MarketError(f"{decision.job_id}: not in the batch")
-        offer = candidates(job, platforms, free_nodes).get(decision.platform)
+        offer = mechanism.offers(job, platforms, free_nodes).get(decision.platform)
         if offer is None:
             raise MarketError(f"{decision.job_id}: platform is not a candidate")
-        cost, value = offer
-        if not cost - _TOLERANCE <= decision.charge <= value + _TOLERANCE:
+        cost, maximum_charge = offer
+        value = job_value(job, platforms[decision.platform])
+        if not cost - _TOLERANCE <= decision.charge <= maximum_charge + _TOLERANCE:
             raise MarketError(f"{decision.job_id}: charge is outside its offer")
         used[decision.platform] += job.num_nodes
         if used[decision.platform] > free_nodes[decision.platform]:
@@ -115,7 +119,7 @@ def _check_decisions(batch, platforms, free_nodes, decisions: list[Decision]):
         checked[decision.job_id] = (job, decision, cost, value)
     left = {name: free_nodes[name] - used[name] for name in platforms}
     for job in batch:
-        if job.job_id not in checked and candidates(job, platforms, left):
+        if job.job_id not in checked and mechanism.offers(job, platforms, left):
             raise MarketError(f"{job.job_id}: left waiting on free nodes")
     return [checked[job.job_id] for job in batch if job.job_id in checked]
 
@@ -138,12 +142,12 @@ def _configuration(platforms, mechanism, window_s, prefix):
     }
 
 
-def _blocked_by(job, platforms, full_nodes):
+def _blocked_by(job, platforms, full_nodes, mechanism):
     if not any(job.requires <= platform.hardware for platform in platforms.values()):
         return "hardware"
     if not any(platform.fits(job) for platform in platforms.values()):
         return "oversize"
-    if not candidates(job, platforms, full_nodes):
+    if not mechanism.offers(job, platforms, full_nodes):
         return "unaffordable"
     return None
 
@@ -170,7 +174,7 @@ def run(
         # Nothing is turned away. A job that no platform could run at its price,
         # even idle, waits outside the auction: at fixed prices and shares, until
         # the run ends.
-        reason = _blocked_by(job, platforms, full)
+        reason = _blocked_by(job, platforms, full, mechanism)
         if reason is None:
             arrivals.append(job)
         else:
@@ -191,12 +195,12 @@ def run(
         free = {name: platform.free_nodes() for name, platform in platforms.items()}
         batch = []
         for job in queue:
-            if candidates(job, platforms, free):
+            if mechanism.offers(job, platforms, free):
                 batch.append(job)
                 if len(batch) == prefix:
                     break
         decisions = list(mechanism.decide(batch, platforms, free))
-        winners = _check_decisions(batch, platforms, free, decisions)
+        winners = _check_decisions(batch, platforms, free, mechanism, decisions)
         grouped = {name: [] for name in platforms}
         for job, decision, _, _ in winners:
             grouped[decision.platform].append(job)
