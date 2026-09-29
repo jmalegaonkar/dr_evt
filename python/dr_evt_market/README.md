@@ -132,10 +132,14 @@ limit.
 
 ## Outputs
 
-`run` writes `routed.csv`, `waiting.csv`, and `summary.json`. The routed ledger holds
-the chosen platform, cost, value, premium, charge, and timing. The summary contains
-the resolved configuration, platform statistics, welfare, revenue, counts, and the
-SHA-256 digest of `routed.csv`.
+`run` writes `routed.csv`, `waiting.csv`, `service.csv`, and `summary.json`. The routed
+ledger holds the chosen platform, cost, value, premium, charge, and timing. A routed
+job's community is its `source`, or the empty string when absent. `service.csv` has one
+row per community plus `all`: count, mean wait (`begin_s - submit_s`), node-hour-weighted
+mean wait with weight `num_nodes * (end_s - begin_s) / 3600`, and mean bounded slowdown
+`max(1, (wait + run) / max(run, 10))`, where `run = end_s - begin_s`. The summary repeats
+these measures under `service`, along with the resolved configuration, platform
+statistics, welfare, revenue, counts, and the SHA-256 digest of `routed.csv`.
 
 The market turns no job away. A job that no platform could run at its price, even with
 every node free, waits outside the auction: no platform has its `hardware`, it is

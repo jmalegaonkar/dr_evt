@@ -30,6 +30,13 @@ _ROUTED_FIELDS = (
     "end_s",
 )
 _WAITING_FIELDS = ("job_id", "reason", "submit_s")
+_SERVICE_FIELDS = (
+    "community",
+    "count",
+    "mean_wait_s",
+    "node_hour_weighted_mean_wait_s",
+    "mean_bounded_slowdown",
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,17 @@ class Waiting:
     submit_s: int
 
 
+@dataclass(frozen=True)
+class _Service:
+    """Service measures for one community or all routed jobs."""
+
+    community: str
+    count: int
+    mean_wait_s: float
+    node_hour_weighted_mean_wait_s: float
+    mean_bounded_slowdown: float
+
+
 @dataclass
 class Result:
     """The routes, the jobs still waiting, statistics and resolved configuration."""
@@ -66,6 +84,7 @@ class Result:
     waiting: list[Waiting]
     statistics: dict[str, dict[str, float]]
     configuration: dict
+    communities: dict[str, tuple[str, int]]
 
 
 class MarketError(RuntimeError):
@@ -222,6 +241,7 @@ def run(
         waiting,
         statistics,
         _configuration(platforms, mechanism, window_s, prefix),
+        {job.job_id: (job.source, job.num_nodes) for job in ordered},
     )
 
 
@@ -232,18 +252,56 @@ def _write_csv(path, fields, rows):
         writer.writerows(asdict(row) for row in rows)
 
 
+def _service_row(community, jobs) -> _Service:
+    """Summarize service for routed rows paired with their node counts."""
+    if not jobs:
+        return _Service(community, 0, 0.0, 0.0, 0.0)
+    waits = [row.begin_s - row.submit_s for row, _ in jobs]
+    runs = [row.end_s - row.begin_s for row, _ in jobs]
+    weights = [nodes * run / 3600 for (_, nodes), run in zip(jobs, runs)]
+    slowdowns = [
+        max(1.0, (wait + run) / max(run, 10)) for wait, run in zip(waits, runs)
+    ]
+    return _Service(
+        community,
+        len(jobs),
+        sum(waits) / len(jobs),
+        sum(wait * weight for wait, weight in zip(waits, weights)) / sum(weights),
+        sum(slowdowns) / len(jobs),
+    )
+
+
+def _service(result: Result) -> list[_Service]:
+    """Return service measures by community and for all routed jobs."""
+    grouped = {}
+    all_jobs = []
+    for row in result.routed:
+        community, nodes = result.communities[row.job_id]
+        grouped.setdefault(community, []).append((row, nodes))
+        all_jobs.append((row, nodes))
+    rows = [_service_row(name, grouped[name]) for name in sorted(grouped)]
+    return rows + [_service_row("all", all_jobs)]
+
+
 def write_outputs(result: Result, out_dir) -> dict[str, str]:
     """Write deterministic market outputs and return their paths and hash."""
     root = Path(out_dir)
     root.mkdir(parents=True, exist_ok=True)
     routed_path = root / "routed.csv"
     waiting_path = root / "waiting.csv"
+    service_path = root / "service.csv"
     summary_path = root / "summary.json"
     _write_csv(routed_path, _ROUTED_FIELDS, result.routed)
     _write_csv(waiting_path, _WAITING_FIELDS, result.waiting)
+    service = _service(result)
+    _write_csv(service_path, _SERVICE_FIELDS, service)
     digest = hashlib.sha256(routed_path.read_bytes()).hexdigest()
     summary = {
         "configuration": result.configuration,
+        "service": {
+            row.community: {field: getattr(row, field) for field in _SERVICE_FIELDS[1:]}
+            for row in service
+        },
         "statistics": result.statistics,
         "welfare": sum(row.value - row.cost for row in result.routed),
         "revenue": sum(row.charge for row in result.routed),
@@ -257,6 +315,7 @@ def write_outputs(result: Result, out_dir) -> dict[str, str]:
     return {
         "routed": str(routed_path),
         "waiting": str(waiting_path),
+        "service": str(service_path),
         "summary": str(summary_path),
         "sha256": digest,
     }

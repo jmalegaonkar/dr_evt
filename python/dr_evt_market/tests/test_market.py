@@ -8,6 +8,7 @@
 """Tests for the market loop, its outputs and the command line."""
 
 import collections
+import csv
 import json
 import math
 import os
@@ -130,6 +131,54 @@ class MarketTests(unittest.TestCase):
                 Path(first_paths["routed"]).read_bytes(),
                 Path(second_paths["routed"]).read_bytes(),
             )
+
+    def test_service_has_one_row_per_routed_source(self) -> None:
+        """The service table covers every routed source and the aggregate."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jobs, result = self._fixture(root)
+            paths = write_outputs(result, root / "out")
+            with Path(paths["service"]).open(newline="", encoding="utf-8") as stream:
+                rows = list(csv.DictReader(stream))
+            summary = json.loads(Path(paths["summary"]).read_text(encoding="utf-8"))
+        routed = {row.job_id for row in result.routed}
+        communities = sorted({job.source for job in jobs if job.job_id in routed})
+        self.assertEqual([row["community"] for row in rows], [*communities, "all"])
+        self.assertEqual(set(summary["service"]), {*communities, "all"})
+
+    def test_all_service_matches_the_routed_mean(self) -> None:
+        """The all row averages every routed job rather than communities."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jobs, result = self._fixture(root)
+            paths = write_outputs(result, root / "out")
+            summary = json.loads(Path(paths["summary"]).read_text(encoding="utf-8"))
+        by_id = {job.job_id: job for job in jobs}
+        waits = [row.begin_s - row.submit_s for row in result.routed]
+        weights = [
+            by_id[row.job_id].num_nodes * (row.end_s - row.begin_s) / 3600
+            for row in result.routed
+        ]
+        service = summary["service"]["all"]
+        self.assertEqual(service["count"], len(result.routed))
+        self.assertAlmostEqual(service["mean_wait_s"], sum(waits) / len(waits))
+        self.assertAlmostEqual(
+            service["node_hour_weighted_mean_wait_s"],
+            sum(wait * weight for wait, weight in zip(waits, weights)) / sum(weights),
+        )
+
+    def test_service_uses_bounded_slowdown_with_a_ten_second_floor(self) -> None:
+        """One short job has a hand-checked bounded slowdown."""
+        job = Job("short", 7, 2, 5, 2.0, {"gpu"})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            platforms = federation(root / "platforms", share=0.1, names=("corona",))
+            result = run([job], platforms, Vcg(), window_s=60)
+            paths = write_outputs(result, root / "out")
+            summary = json.loads(Path(paths["summary"]).read_text(encoding="utf-8"))
+        self.assertEqual(result.routed[0].begin_s - job.submit_s, 53)
+        self.assertEqual(result.routed[0].end_s - result.routed[0].begin_s, 5)
+        self.assertAlmostEqual(summary["service"][""]["mean_bounded_slowdown"], 5.8)
 
     def test_prefix_two_limits_each_window(self) -> None:
         """A prefix of two drains the stream with at most two winners per window."""
