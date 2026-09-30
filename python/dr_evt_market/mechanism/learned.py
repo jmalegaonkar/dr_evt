@@ -71,12 +71,14 @@ class Window:
         cost = self.cost()
         scale = self.scale().view(-1, 1, 1)
         offer = self.offers(prices)
+        # A platform may expose no nodes; it then offers nothing, and scales by one.
+        exposed = self.exposed.clamp(min=1.0)
         channels = torch.stack(
             [
                 self.value(prices) / scale,
                 cost / scale,
-                (self.nodes.unsqueeze(-1) / self.exposed.unsqueeze(1)).expand_as(cost),
-                (self.free / self.exposed).unsqueeze(1).expand_as(cost),
+                (self.nodes.unsqueeze(-1) / exposed.unsqueeze(1)).expand_as(cost),
+                (self.free / exposed).unsqueeze(1).expand_as(cost),
                 offer.double(),
             ],
             dim=-1,

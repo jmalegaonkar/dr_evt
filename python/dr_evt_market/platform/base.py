@@ -11,21 +11,9 @@ import math
 from numbers import Real
 from pathlib import Path
 
-_STATISTIC_FIELDS = (
-    "avg_turnaround_time",
-    "avg_wait_time",
-    "current_time",
-    "jobs_completed",
-    "jobs_running",
-    "jobs_submitted",
-    "jobs_waiting",
-    "makespan",
-    "nodes_available",
-    "nodes_in_use",
-    "resource_area",
-    "total_nodes",
-    "utilization",
-)
+# The market submits only jobs that start at once, so dr_evt's queue statistics are
+# empty by construction; these are the ones that say something.
+_STATISTIC_FIELDS = ("jobs_completed", "utilization", "makespan")
 
 
 class Platform:
@@ -39,13 +27,17 @@ class Platform:
 
     def __init__(self, work_dir: str | Path, share: float = 1.0) -> None:
         """Create the platform's header file and streaming simulation."""
-        if isinstance(share, bool) or not isinstance(share, Real) or not 0 < share <= 1:
-            raise ValueError("share must be a number in (0, 1]")
+        if (
+            isinstance(share, bool)
+            or not isinstance(share, Real)
+            or not 0 <= share <= 1
+        ):
+            raise ValueError("share must be a number in [0, 1]")
 
         import dr_evt
 
         self.share = float(share)
-        self.exposed_nodes = max(1, round(self.total_nodes * self.share))
+        self.exposed_nodes = round(self.total_nodes * self.share)
         self._work_dir = Path(work_dir).resolve()
         self._work_dir.mkdir(parents=True, exist_ok=True)
         self._header_path = self._work_dir / f"{self.name}.csv"
@@ -106,19 +98,18 @@ class Platform:
         """Return the number of jobs waiting for scheduler placement."""
         return int(self._simulation.get_active_job_count())
 
-    def submit(self, jobs, time_s: int) -> list[int]:
-        """Submit jobs at one time in their given order and return their IDs."""
+    def submit(self, jobs, time_s: int) -> None:
+        """Submit jobs at one time, in their given order."""
         requests = [
             self._dr_evt.JobAppendRequest(
                 time_s, job.num_nodes, "1", self.run_time(job)
             )
             for job in jobs
         ]
-        if not requests:
-            return []
-        return [int(job_id) for job_id in self._simulation.append_jobs(requests)]
+        if requests:
+            self._simulation.append_jobs(requests)
 
     def statistics(self) -> dict[str, float]:
-        """Return all simulation statistics as an ordered mapping of floats."""
+        """Return the simulation's completed jobs, utilization and makespan."""
         statistics = self._simulation.get_statistics()
         return {field: float(getattr(statistics, field)) for field in _STATISTIC_FIELDS}

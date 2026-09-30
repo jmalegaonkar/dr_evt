@@ -51,19 +51,23 @@ class PlatformTests(unittest.TestCase):
     """Exercise platform profiles and their streaming simulations."""
 
     def test_profiles_expose_a_share_and_validate_it(self) -> None:
-        """Each profile sizes its simulation from a valid share."""
+        """Each profile sizes its simulation from a share, which may be zero."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for profile in PLATFORMS:
                 with self.subTest(profile=profile.name):
                     platform = profile(root / profile.name, share=0.05)
-                    expected = max(1, round(profile.total_nodes * 0.05))
+                    expected = round(profile.total_nodes * 0.05)
                     self.assertEqual(platform.exposed_nodes, expected)
 
-            with self.assertRaises(ValueError):
-                Dane(root / "zero", share=0)
+            closed = Dane(root / "zero", share=0)
+            closed.advance_to(0)
+            self.assertEqual((closed.exposed_nodes, closed.free_nodes()), (0, 0))
+            self.assertFalse(closed.fits(_job(1, 60)))
             with self.assertRaises(ValueError):
                 Dane(root / "large", share=1.5)
+            with self.assertRaises(ValueError):
+                Dane(root / "negative", share=-0.1)
 
     def test_jobs_start_together_and_release_nodes(self) -> None:
         """Jobs start together and release at their platform run times."""
@@ -73,7 +77,7 @@ class PlatformTests(unittest.TestCase):
             self.assertEqual(platform.free_nodes(), platform.exposed_nodes)
 
             jobs = [_job(20, 10, "gpu"), _job(30, 10, "cpu")]
-            self.assertEqual(len(platform.submit(jobs, 0)), 2)
+            platform.submit(jobs, 0)
             platform.advance_to(0)
             self.assertEqual(platform.waiting(), 0)
             self.assertEqual(platform.free_nodes(), platform.exposed_nodes - 50)

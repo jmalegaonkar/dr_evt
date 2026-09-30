@@ -162,11 +162,12 @@ def train_regretformer(
         gained = (earned.sum((1, 2)) / scale).mean()
         nodes = window.nodes[..., None]
         demand = (allocation * nodes).sum(1)
-        overbooked = (torch.relu(demand - window.free) / window.exposed).sum(-1).mean()
+        exposed = window.exposed.clamp(min=1.0)
+        overbooked = (torch.relu(demand - window.free) / exposed).sum(-1).mean()
         # The market places every job that fits, so waiting may hold back a job only
         # when its platforms are full: charge the free nodes such waiting leaves idle.
         held = torch.minimum(torch.relu(window.free - demand), (waiting * nodes).sum(1))
-        idle = (held / window.exposed).sum(-1).mean()
+        idle = (held / exposed).sum(-1).mean()
         lost = regret(window, truth, utility, scale)
         loss = -gained + multiplier * lost + capacity * (overbooked + idle)
         optimizer.zero_grad()

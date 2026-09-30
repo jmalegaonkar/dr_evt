@@ -144,7 +144,36 @@ Each limit is the run time: j000001 asked for 120 s and ran 40 s. The bids are s
 (`02_bids.md`): single bids by default, and one `bid:<platform>` column per platform
 with `--bids multi`.
 
-## 1.7 Modelling choices
+## 1.7 Synthetic days
+
+With `synthetic=True` (`--synthetic`), `prepare` returns one day drawn from the interval
+instead of the interval itself: the jobs are real, but the day's mix is new, and each
+seed draws another day. The interval is the pool, typically a busy stretch of whole
+days.
+
+1. **Groups.** Each source's cleaned jobs are split into groups: jobs one user submitted
+   less than a minute apart. Most groups are a single job; the rest are arrays, often
+   many copies of one job.
+2. **How many.** For each source, the number of groups in the day is drawn from a
+   Poisson distribution whose mean is the source's groups per day in the interval.
+3. **Which and when.** That many groups are drawn at random from the source, each at
+   most once, and each arrives at the time of day it really arrived, counted from the
+   interval's start. A start at midnight gives clock times.
+4. **Then as usual.** The sources are merged by time, and ids, hardware and bids follow
+   as for a real interval.
+
+Groups matter because arrays arrive as waves, and the waves are what queue: drawing
+single jobs at a Poisson rate spreads each array over the day. The times of day carry
+each source's daily pattern, so no curve has to be fitted.
+
+- The seed fixes the day: each source draws from a generator keyed by the seed and the
+  source.
+- A job appears at most once in a day, so it keeps its identity, and with it its
+  hardware and bid draws.
+- The summary adds, for each source, `groups:<source>` in the interval and
+  `synthetic:<source>` jobs in the day; `kept` still counts the interval's jobs.
+
+## 1.8 Modelling choices
 
 These choices are open to revision:
 
@@ -157,3 +186,6 @@ These choices are open to revision:
   drawn per job, with the same probability for every source.
 - **The request is only carried.** A job that ran past its request runs its recorded
   time.
+- **Synthetic days.** Groups are jobs one user submitted within a minute of each other.
+  Their number per day is Poisson, for each source on its own, and each keeps its time
+  of day.

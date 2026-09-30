@@ -8,9 +8,11 @@ runs the resulting streams.
 ## Platforms
 
 `Platform` owns one in-process simulation. Its `share` sets `exposed_nodes` to the
-larger of one node and the rounded share of the real machine. Hardware tags determine
-whether a job fits. Speed is relative to Quartz at 1.0 and selects the platform run
-time and priced reservation for that job's hardware.
+rounded share of the real machine; a share of zero exposes no nodes, and the market
+routes around that platform. Hardware tags determine whether a job fits. Speed is
+relative to Quartz at 1.0 and selects the platform run time and priced reservation for
+that job's hardware. The market submits only jobs that start at once, so dr_evt never
+holds a job in its queue: it keeps each platform's clock, capacity and utilization.
 
 | Profile | Nodes | Price per node-hour | CPU speed | GPU speed | Hardware |
 |---|---:|---:|---:|---:|---|
@@ -164,8 +166,9 @@ job's community is its `source`, or the empty string when absent. `service.csv` 
 row per community plus `all`: count, mean wait (`begin_s - submit_s`), node-hour-weighted
 mean wait with weight `num_nodes * (end_s - begin_s) / 3600`, and mean bounded slowdown
 `max(1, (wait + run) / max(run, 10))`, where `run = end_s - begin_s`. The summary repeats
-these measures under `service`, along with the resolved configuration, platform
-statistics, welfare, revenue, counts, and the SHA-256 digest of `routed.csv`.
+these measures under `service`, along with the resolved configuration, each platform's
+completed jobs, utilization and makespan from dr_evt, welfare, revenue, counts, and the
+SHA-256 digest of `routed.csv`.
 
 The market turns no job away. A job that no platform could run at its price, even with
 every node free, waits outside the auction: no platform has its `hardware`, it is
@@ -209,6 +212,19 @@ traces' own clock, which is epoch seconds for LC traces. Bids are single bids ov
 five default platforms; `--bids multi` writes a bid per platform instead, and
 `--platforms` names other platforms. Use `--format simple` for the simple trace format.
 Trace sources are community labels and need not name profiles.
+
+To draw a synthetic day from an interval instead of replaying it:
+
+```bash
+python -m dr_evt_market prepare \
+  --trace corona=/path/to/corona.csv --trace tioga=/path/to/tioga.csv \
+  --out day.csv --start START --hours 72 --synthetic --seed 3
+```
+
+Each trace's jobs are split into groups one user submitted less than a minute apart. For
+each trace, the day takes a Poisson number of its groups, with the trace's mean per day
+in the interval, drawn at random and at most once; each group arrives at its real time
+of day, counted from `--start`. The seed fixes the day.
 
 ## Tests and notebook
 

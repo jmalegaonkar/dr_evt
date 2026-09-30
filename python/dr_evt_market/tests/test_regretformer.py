@@ -83,6 +83,16 @@ class RegretFormerTests(unittest.TestCase):
                     self.assertLessEqual(row.cost, row.charge)
                     self.assertLessEqual(row.charge, row.value)
 
+    def test_a_platform_with_no_nodes_leaves_the_network_finite(self) -> None:
+        """A platform with no nodes scales by one and receives no job."""
+        jobs = [job for job in read_jobs(_DATA / "jobs.csv") if job.submit_s == 0]
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share={"corona": 0.0, "dane": 0.1})
+            free = {name: item.exposed_nodes for name, item in platforms.items()}
+            decisions = RegretFormer(seed=0).decide(jobs, platforms, free)
+        self.assertTrue(decisions)
+        self.assertNotIn("corona", {decision.platform for decision in decisions})
+
     def test_a_job_stays_queued_only_without_room(self) -> None:
         """After a contended window, no queued job fits the nodes that are left."""
         jobs = [job for job in read_jobs(_DATA / "jobs.csv") if job.submit_s == 0]

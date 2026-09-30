@@ -25,7 +25,7 @@ LC traces --prepare--> jobs.csv --run--> every 60 s: admit arrivals
 - **The market never turns a job away.** A job waits in the queue until a platform it
   can win has room for it, and every winner starts in the window it wins.
 
-Each step has a detailed page: `01_jobs.md` for step 1 and `02_bids.md` for step 2.
+Each step has a detailed page: `01_jobs.md`, `02_bids.md` and `03_platforms.md` so far.
 
 ## 1. Jobs: sourcing and cleaning
 
@@ -54,6 +54,10 @@ Code: `jobs/traces.py` (`read_lc`, `read_simple`) and `jobs/prepare.py` (`prepar
   that is, on a machine of speed 1.0.
 - **Source.** The trace a job comes from is a community label for analysis. It does
   not choose a platform or the job's hardware.
+- **Synthetic days.** With `--synthetic`, the interval becomes a pool instead of the day
+  itself. For each source, a Poisson number of real groups (arrays, or single jobs),
+  with the source's mean per day, is drawn at random, and each group arrives at its real
+  time of day. Each seed gives a new day.
 
 ## 2. Bids: the synthetic willingness to pay
 
@@ -102,9 +106,9 @@ reference node-hour of work on that machine.
 | Tioga | 32 | 2.70 | 1.594 | 7.042 | 1.694 | 0.383 |
 | Tuolumne | 1152 | 0.19 | 1.401 | 3.313 | 0.136 | 0.057 |
 
-- **Share.** A platform exposes `max(1, round(nodes x share))` nodes to the federation
-  and owns one dr_evt simulation of that slice, in LIMIT mode with EASY backfilling and
-  FCFS order.
+- **Share.** A platform exposes `round(nodes x share)` nodes to the federation, possibly
+  none, and the share can differ per machine. It owns one dr_evt simulation of that
+  slice, in LIMIT mode with EASY backfilling and FCFS order. Details: `03_platforms.md`.
 - **Speed.** On platform `p` a job holds its nodes for `ceil(limit / speed)` seconds
   and costs `posted price x nodes x limit / speed / 3600`: the posted price times the
   node-hours it uses there. Dane has no GPUs.
@@ -140,8 +144,8 @@ Code: `market.py` (`run`, `_check_decisions`, `_blocked_by`).
    lies between its cost and the mechanism's cap; that no platform is over capacity;
    and that no batch job is left waiting while it has an offer on the nodes left over.
 4. **Placement.** Winners are submitted to dr_evt with their speed-adjusted run time.
-   After another advance, nothing may be waiting inside dr_evt: every winner starts at
-   the window time. The market records `begin = t` and `end = t + run time`, and the
+   After another advance, no winner may still wait in dr_evt's queue (jobs that are
+   running are fine): every winner starts at the window time. The market records `begin = t` and `end = t + run time`, and the
    other jobs stay queued for the next window.
 
 ## 6. Mechanisms
@@ -171,9 +175,9 @@ Code: `market.py` (`write_outputs`) and `cli.py`.
 - **`service.csv`**: for each community (the job's source) and for `all`: the count,
   the mean wait, the mean wait weighted by node-hours, and the mean bounded slowdown
   `max(1, (wait + run) / max(run, 10))`.
-- **`summary.json`**: the configuration, dr_evt's statistics for each platform,
-  welfare (the total of value minus cost), revenue (the total of charges), the counts,
-  and the SHA-256 digest of `routed.csv`.
+- **`summary.json`**: the configuration, each platform's completed jobs, utilization
+  and makespan from dr_evt, welfare (the total of value minus cost), revenue (the total
+  of charges), the counts, and the SHA-256 digest of `routed.csv`.
 
 The commands are `python -m dr_evt_market prepare` (traces to a jobs file), `run` (a
 jobs file through one mechanism) and `train` (RegretFormer on the windows of a VCG run).

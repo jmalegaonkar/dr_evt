@@ -17,6 +17,10 @@ from .base import Platform
 # and using its reciprocal. The sample has 635 rows across 8 applications.
 # Corona has no matrix row and uses 1.0. Dane's CPU values are bimodal, so its
 # median-based speed is sensitive to the aggregation rule.
+#
+# Node counts: Corona's and Tuolumne's are LLNL's published numbers. Tioga's page
+# lists 24 compute nodes; it keeps 32 until its size is confirmed. Posted prices per
+# node-hour, like Dane's and Matrix's node counts, were set on 2026-09-28.
 
 
 class Corona(Platform):

@@ -250,6 +250,22 @@ class MarketTests(unittest.TestCase):
             {"big": 0, "poor": 120, "rich": 180},
         )
 
+    def test_a_platform_with_no_nodes_takes_no_jobs(self) -> None:
+        """A share of zero exposes no nodes, and the market routes around it."""
+        jobs = read_jobs(_DATA / "jobs.csv")
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share={"tuolumne": 0.0})
+            result = run(jobs, platforms, Vcg())
+        self.assertEqual(
+            result.configuration["platforms"]["tuolumne"]["exposed_nodes"], 0
+        )
+        self.assertTrue(result.routed)
+        self.assertNotIn("tuolumne", {row.platform for row in result.routed})
+        self.assertEqual(
+            set(result.statistics["tuolumne"]),
+            {"jobs_completed", "utilization", "makespan"},
+        )
+
     def test_invalid_mechanism_decisions_raise(self) -> None:
         """Outside-batch and over-capacity decisions violate the guarantee."""
         jobs = read_jobs(_DATA / "jobs.csv")

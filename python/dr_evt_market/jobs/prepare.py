@@ -12,6 +12,7 @@ from numbers import Real
 
 from .bids import PERSONAS, generator, multi_bid, single_bid, terms
 from .job import Job
+from .synthetic import synthesize
 from .traces import read_lc, read_simple
 
 
@@ -38,12 +39,13 @@ def prepare(
     seed=0,
     gpu_fraction=0.5,
     requires=None,
+    synthetic=False,
 ) -> tuple[list[Job], dict[str, int]]:
     """Prepare deterministic jobs from one interval across named traces.
 
     `platforms` are the profiles bid on, each with a `name`, a posted
     `price_per_node_hour`, its `hardware` and its `speed`. `bids` is "single" or
-    "multi".
+    "multi". With `synthetic`, the jobs are one day drawn from the interval instead.
     """
     readers = {"lc": read_lc, "simple": read_simple}
     if trace_format not in readers:
@@ -79,15 +81,24 @@ def prepare(
         "outside_interval": len(records) - len(selected),
     }
     summary.update({f"kept:{source}": 0 for source in traces})
-    summary.update({f"persona:{name}": 0 for name in PERSONAS})
 
     kept = []
     for record in selected:
         reason = _drop_reason(record)
         if reason is None:
             kept.append(record)
-            continue
-        summary[reason] += 1
+            summary[f"kept:{record.source}"] += 1
+        else:
+            summary[reason] += 1
+    summary["kept"] = len(kept)
+    if synthetic:
+        last = max((row.submit for row in selected), default=lower)
+        end = upper if upper < math.inf else last + 1
+        kept, found = synthesize(kept, lower, end, seed)
+        for source in traces:
+            summary[f"groups:{source}"] = found.get(source, 0)
+            summary[f"synthetic:{source}"] = sum(row.source == source for row in kept)
+    summary.update({f"persona:{name}": 0 for name in PERSONAS})
 
     origin = kept[0].submit if kept else 0
     requirement_override = None if requires is None else frozenset(requires.split())
@@ -130,7 +141,5 @@ def prepare(
                 job_terms.persona,
             )
         )
-        summary[f"kept:{record.source}"] += 1
         summary[f"persona:{job_terms.persona}"] += 1
-    summary["kept"] = len(jobs)
     return jobs, summary
