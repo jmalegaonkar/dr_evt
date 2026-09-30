@@ -10,6 +10,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+# Two amounts of money closer than this are equal: a bid exactly at the posted price
+# covers it, and a charge may sit on either of its bounds.
+TOLERANCE = 1.0e-9
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -58,6 +62,6 @@ def offers(job, platforms, free_nodes) -> dict[str, tuple[float, float]]:
             continue
         cost = platforms[name].cost(job)
         value = job_value(job, platforms[name])
-        if value + 1.0e-9 >= cost:
+        if value + TOLERANCE >= cost:
             result[name] = (cost, value)
     return result

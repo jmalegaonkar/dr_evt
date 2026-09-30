@@ -14,7 +14,8 @@ import numpy as np
 import torch
 from torch import nn
 
-_TOLERANCE = 1.0e-9
+from .base import TOLERANCE
+
 _CHANNELS = 5
 
 
@@ -46,7 +47,7 @@ class Window:
         """Return each window's mean posted cost over the cells that fit, [B]."""
         public = self.fits & self.jobs.unsqueeze(-1)
         total = (self.cost() * public).sum((1, 2))
-        return (total / public.sum((1, 2)).clamp(min=1)).clamp(min=_TOLERANCE)
+        return (total / public.sum((1, 2)).clamp(min=1)).clamp(min=TOLERANCE)
 
     def cost(self) -> torch.Tensor:
         """Return the posted cost of every job on every platform."""
@@ -63,7 +64,7 @@ class Window:
         return (
             self.fits
             & (self.nodes.unsqueeze(-1) <= self.free.unsqueeze(1))
-            & (self.value(prices) + _TOLERANCE >= self.cost())
+            & (self.value(prices) + TOLERANCE >= self.cost())
         )
 
     def features(self, prices: torch.Tensor):

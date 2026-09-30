@@ -25,7 +25,7 @@ LC traces --prepare--> jobs.csv --run--> every 60 s: admit arrivals
 - **The market never turns a job away.** A job waits in the queue until a platform it
   can win has room for it, and every winner starts in the window it wins.
 
-Each step has a detailed page: `01_jobs.md`, `02_bids.md` and `03_platforms.md` so far.
+Each step has a detailed page: `01_jobs.md` to `04_offers.md` so far.
 
 ## 1. Jobs: sourcing and cleaning
 
@@ -115,7 +115,8 @@ reference node-hour of work on that machine.
 
 ## 4. Value, cost, candidates and offers
 
-Code: `mechanism/base.py` (`job_value`, `candidates`, `offers`).
+Code: `mechanism/base.py` (`job_value`, `candidates`, `offers`). Details:
+`04_offers.md`.
 
 - **Value.** A single bid is worth `bid x nodes x limit / 3600` on every machine: the
   job gets the same work done anywhere. A multi bid is worth
@@ -145,8 +146,9 @@ Code: `market.py` (`run`, `_check_decisions`, `_blocked_by`).
    and that no batch job is left waiting while it has an offer on the nodes left over.
 4. **Placement.** Winners are submitted to dr_evt with their speed-adjusted run time.
    After another advance, no winner may still wait in dr_evt's queue (jobs that are
-   running are fine): every winner starts at the window time. The market records `begin = t` and `end = t + run time`, and the
-   other jobs stay queued for the next window.
+   running are fine): every winner starts at the window time. The market records
+   `begin = t` and `end = t + run time`, and the other jobs stay queued for the next
+   window.
 
 ## 6. Mechanisms
 

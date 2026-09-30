@@ -109,11 +109,13 @@ VCG lets users keep the savings between their values and the charges above poste
 cost. Pay what you bid assigns offers greedily and gives that surplus to the center.
 Both mechanisms report welfare and revenue through the same market outputs.
 
-`FirstFit` is the no-market baseline over the same federation slices and market loop.
-It ignores bids and visits batch jobs in arrival order, placing each on the available
+`FirstFit` is the no-market baseline over the same federation slices and market loop. It
+ignores bids and visits batch jobs in arrival order, placing each on the available
 platform with the lowest posted cost for that job, including speed, and charging that
-cost. Comparisons therefore change the allocation rule without changing capacity or
-the workload.
+cost. Comparisons therefore change the allocation rule without changing capacity or the
+workload. Since it reads no bid, a job can land where it bid less than the price, or did
+not bid at all, and pay more than its value there: compare `FirstFit` on service, not on
+welfare.
 
 `RegretFormer` is a learned mechanism: the network of Ivanov et al. (NeurIPS 2022) over
 a grid of jobs by platforms. For each job it gives a probability for every platform it

@@ -14,9 +14,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .mechanism import Decision, Mechanism, candidates
-from .mechanism.base import job_value
+from .mechanism.base import TOLERANCE, job_value
 
-_TOLERANCE = 1.0e-9
 _ROUTED_FIELDS = (
     "job_id",
     "platform",
@@ -111,7 +110,7 @@ def _check_decisions(
             raise MarketError(f"{decision.job_id}: no offer on this platform")
         cost, maximum_charge = offer
         value = job_value(job, platforms[decision.platform])
-        if not cost - _TOLERANCE <= decision.charge <= maximum_charge + _TOLERANCE:
+        if not cost - TOLERANCE <= decision.charge <= maximum_charge + TOLERANCE:
             raise MarketError(f"{decision.job_id}: charge is outside its offer")
         used[decision.platform] += job.num_nodes
         if used[decision.platform] > free_nodes[decision.platform]:
