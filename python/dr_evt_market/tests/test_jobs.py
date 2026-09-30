@@ -12,19 +12,26 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 
-from dr_evt_market import Job, prepare, read_jobs, write_jobs
+from dr_evt_market import (
+    DEFAULT_FEDERATION,
+    PLATFORMS,
+    Job,
+    prepare,
+    read_jobs,
+    write_jobs,
+)
 from dr_evt_market.cli import main
 
 _DATA = Path(__file__).with_name("data")
-_REFERENCE_PRICE = 1.234
-_SPEEDS = {
-    "corona": {"cpu": 1.0, "gpu": 1.0},
-    "dane": {"cpu": 0.861},
-    "matrix": {"cpu": 2.574, "gpu": 3.695},
-    "tioga": {"cpu": 1.594, "gpu": 7.042},
-}
-_UNIT_SPEEDS = {name: {"cpu": 1.0, "gpu": 1.0} for name in _SPEEDS}
+_PROFILES = {profile.name: profile for profile in PLATFORMS}
+
+
+def _simple(directory, rows, header="job_submit_time,num_nodes,time_limit,user"):
+    trace = Path(directory) / "simple.csv"
+    trace.write_text(header + "\n" + "".join(rows), encoding="utf-8")
+    return trace
 
 
 class JobTests(unittest.TestCase):
@@ -63,10 +70,10 @@ class JobTests(unittest.TestCase):
                 read_jobs(path)
 
     def test_prepare_lc_interval_and_summary(self) -> None:
-        """LC preparation filters one interval and counts each drop reason."""
+        """LC preparation filters one interval and counts drops and personas."""
         jobs, summary = prepare(
             {"tioga": _DATA / "trace.csv"},
-            reference_price=_REFERENCE_PRICE,
+            platforms=PLATFORMS,
             start=1000,
             hours=0.05,
             seed=3,
@@ -82,6 +89,10 @@ class JobTests(unittest.TestCase):
                 "bad_runtime": 1,
                 "outside_interval": 2,
                 "kept:tioga": 5,
+                "persona:sticker": 1,
+                "persona:tier": 2,
+                "persona:value": 2,
+                "persona:whale": 0,
             },
         )
         self.assertEqual([job.submit_s for job in jobs], [0, 35, 85, 115, 174])
@@ -92,10 +103,10 @@ class JobTests(unittest.TestCase):
             [job.requires for job in jobs],
             [
                 frozenset(),
-                frozenset({"gpu"}),
-                frozenset({"gpu"}),
-                frozenset({"gpu"}),
                 frozenset(),
+                frozenset({"gpu"}),
+                frozenset({"gpu"}),
+                frozenset({"gpu"}),
             ],
         )
 
@@ -104,7 +115,7 @@ class JobTests(unittest.TestCase):
         traces = {"beta": _DATA / "trace.csv", "alpha": _DATA / "trace.csv"}
         jobs, summary = prepare(
             traces,
-            reference_price=_REFERENCE_PRICE,
+            platforms=PLATFORMS,
             start=1000,
             hours=0.05,
             seed=0,
@@ -119,11 +130,7 @@ class JobTests(unittest.TestCase):
     def test_prepare_is_deterministic_and_round_trips(self) -> None:
         """A seed fixes output bytes, and written rows read back as jobs."""
         traces = {"tioga": _DATA / "trace.csv"}
-        options = {
-            "reference_price": _REFERENCE_PRICE,
-            "start": 1000,
-            "hours": 0.05,
-        }
+        options = {"platforms": PLATFORMS, "start": 1000, "hours": 0.05}
         jobs, _ = prepare(traces, seed=4, **options)
         same_jobs, _ = prepare(traces, seed=4, **options)
         other_jobs, _ = prepare(traces, seed=5, **options)
@@ -137,55 +144,84 @@ class JobTests(unittest.TestCase):
             self.assertNotEqual(first.read_bytes(), other.read_bytes())
             self.assertEqual(read_jobs(first), jobs)
 
-    def test_persona_and_price_are_hash_seeded(self) -> None:
-        """A fixed seed, source, user and trace row give a pinned price."""
+    def test_persona_and_bids_are_hash_seeded(self) -> None:
+        """A fixed seed, source, user and trace row give pinned bids."""
         with tempfile.TemporaryDirectory() as directory:
-            trace = Path(directory) / "simple.csv"
-            trace.write_text(
-                "job_submit_time,num_nodes,time_limit,user\n" "100,2,60,fixed-user\n",
-                encoding="utf-8",
-            )
-            jobs, _ = prepare(
-                {"tioga": trace},
-                reference_price=_REFERENCE_PRICE,
-                trace_format="simple",
-                seed=8,
-            )
-        self.assertEqual(jobs[0].persona, "value")
-        self.assertEqual(jobs[0].bid, 4.7308)
+            trace = _simple(directory, ["100,2,60,fixed-user\n"])
+            options = {"platforms": PLATFORMS, "trace_format": "simple", "seed": 8}
+            single, _ = prepare({"tioga": trace}, **options)
+            multi, _ = prepare({"tioga": trace}, bids="multi", **options)
+        self.assertEqual([single[0].persona, multi[0].persona], ["value", "value"])
+        self.assertEqual(single[0].bid, 1.3533)
+        self.assertEqual(
+            multi[0].bid,
+            {"corona": 1.6245, "matrix": 2.0781, "tioga": 3.4878, "tuolumne": 0.1305},
+        )
+
+    def test_single_bid_prices_work_at_the_mean_level(self) -> None:
+        """A single bid is the mean price of a unit of work times the multiple."""
+        jobs, _ = prepare(
+            {"tioga": _DATA / "trace.csv"},
+            platforms=PLATFORMS,
+            start=1000,
+            hours=0.05,
+            seed=4,
+        )
+        for job in jobs:
+            hardware = "gpu" if "gpu" in job.requires else "cpu"
+            usable = [item for item in PLATFORMS if job.requires <= item.hardware]
+            level = sum(
+                item.price_per_node_hour / item.speed[hardware] for item in usable
+            ) / len(usable)
+            with self.subTest(job=job.job_id):
+                self.assertIsInstance(job.bid, float)
+                if job.persona == "sticker":
+                    self.assertEqual(job.bid, round(level, 4))
+        self.assertEqual([job.bid for job in jobs][1:3], [1.6641, 0.5934])
 
     def test_gpu_fraction_and_requires_override(self) -> None:
-        """GPU draws are per job, and an explicit requirement overrides them."""
+        """GPU draws are per job, and an override moves no other draw."""
         traces = {"tioga": _DATA / "trace.csv"}
-        options = {
-            "reference_price": _REFERENCE_PRICE,
-            "start": 1000,
-            "hours": 0.05,
-            "seed": 4,
-        }
+        options = {"platforms": PLATFORMS, "start": 1000, "hours": 0.05, "seed": 4}
         cpu_jobs, _ = prepare(traces, gpu_fraction=0.0, **options)
         gpu_jobs, _ = prepare(traces, gpu_fraction=1.0, **options)
         overridden, _ = prepare(traces, gpu_fraction=0.0, requires="gpu", **options)
         self.assertTrue(all(not job.requires for job in cpu_jobs))
         self.assertTrue(all(job.requires == {"gpu"} for job in gpu_jobs))
-        self.assertTrue(all(job.requires == {"gpu"} for job in overridden))
+        self.assertEqual(overridden, gpu_jobs)
         with self.assertRaises(ValueError):
             prepare(traces, gpu_fraction=1.1, **options)
+
+    def test_hardware_does_not_depend_on_the_user(self) -> None:
+        """Changing every user changes personas but not a single hardware draw."""
+        with tempfile.TemporaryDirectory() as directory:
+            rows = [f"job{row},{row},1,60,{{}}{row}\n" for row in range(40)]
+            header = "job_id,job_submit_time,num_nodes,time_limit,user"
+            first = _simple(directory, [row.format("a") for row in rows], header)
+            jobs, _ = prepare(
+                {"tioga": first}, platforms=PLATFORMS, trace_format="simple"
+            )
+            second = _simple(directory, [row.format("b") for row in rows], header)
+            others, _ = prepare(
+                {"tioga": second}, platforms=PLATFORMS, trace_format="simple"
+            )
+        self.assertEqual(
+            [job.requires for job in jobs], [job.requires for job in others]
+        )
+        self.assertNotEqual(
+            [job.persona for job in jobs], [job.persona for job in others]
+        )
 
     def test_simple_times_are_floored_sorted_and_shifted(self) -> None:
         """Simple fractional times use the earliest floored submit as zero."""
         with tempfile.TemporaryDirectory() as directory:
-            trace = Path(directory) / "simple.csv"
-            trace.write_text(
-                "job_submit_time,num_nodes,time_limit,actual_run_time\n"
-                "12.9,2,5.9,3.9\n"
-                "10.8,1,4.2,2.7\n",
-                encoding="utf-8",
+            trace = _simple(
+                directory,
+                ["12.9,2,5.9,3.9\n", "10.8,1,4.2,2.7\n"],
+                "job_submit_time,num_nodes,time_limit,actual_run_time",
             )
             jobs, summary = prepare(
-                {"simple": trace},
-                reference_price=_REFERENCE_PRICE,
-                trace_format="simple",
+                {"simple": trace}, platforms=PLATFORMS, trace_format="simple"
             )
         self.assertEqual([job.submit_s for job in jobs], [0, 2])
         self.assertEqual([job.limit_s for job in jobs], [2, 3])
@@ -220,101 +256,144 @@ class JobTests(unittest.TestCase):
             path = Path(directory) / "both.csv"
             path.write_text(
                 "job_id,job_submit_time,num_nodes,time_limit,bid,bid:corona\n"
-                "mixed,0,1,1,9.0,2.5\n",
+                "mixed,0,1,1,9.0,2.5\n"
+                "none,0,1,1,,\n",
                 encoding="utf-8",
             )
-            self.assertEqual(read_jobs(path)[0].bid, {"corona": 2.5})
+            self.assertEqual(
+                [job.bid for job in read_jobs(path)], [{"corona": 2.5}, {}]
+            )
 
-    def test_prepare_per_platform_bids_round_trip(self) -> None:
-        """Prepared mapped bids are deterministic and retain dynamic columns."""
+    def test_multi_bids_cover_each_platform_with_the_hardware(self) -> None:
+        """Every platform with a job's hardware gets a bid, and they round-trip."""
         traces = {"tioga": _DATA / "trace.csv"}
-        jobs, _ = prepare(
-            traces,
-            reference_price=_REFERENCE_PRICE,
-            start=1000,
-            hours=0.05,
-            seed=4,
-            per_platform=("corona", "matrix"),
-            speeds=_SPEEDS,
+        options = {
+            "platforms": PLATFORMS,
+            "bids": "multi",
+            "start": 1000,
+            "hours": 0.05,
+            "seed": 4,
+        }
+        jobs, _ = prepare(traces, **options)
+        again, _ = prepare(traces, **options)
+        for job in jobs:
+            expected = [
+                profile.name
+                for profile in PLATFORMS
+                if job.requires <= profile.hardware
+            ]
+            self.assertEqual(list(job.bid), expected)
+        self.assertEqual(
+            jobs[1].bid,
+            {
+                "corona": 1.7873,
+                "dane": 0.5701,
+                "matrix": 5.0557,
+                "tioga": 4.7905,
+                "tuolumne": 0.5039,
+            },
         )
-        again, _ = prepare(
-            traces,
-            reference_price=_REFERENCE_PRICE,
-            start=1000,
-            hours=0.05,
-            seed=4,
-            per_platform=("corona", "matrix"),
-            speeds=_SPEEDS,
-        )
-        self.assertTrue(all(list(job.bid) == ["corona", "matrix"] for job in jobs))
-        self.assertEqual(jobs[0].bid, {"corona": 5.9795, "matrix": 15.826})
         self.assertEqual(jobs, again)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "mapped.csv"
             write_jobs(jobs, path)
             header = path.read_text(encoding="utf-8").splitlines()[0]
-            self.assertIn("bid,bid:corona,bid:matrix,requires", header)
+            self.assertIn(
+                "bid,bid:corona,bid:dane,bid:matrix,bid:tioga,bid:tuolumne,requires",
+                header,
+            )
             self.assertEqual(read_jobs(path), jobs)
+
+    def test_bids_follow_the_posted_prices(self) -> None:
+        """Doubling every posted price doubles single bids and each multi bid."""
+
+        def profiles(scale):
+            return [
+                SimpleNamespace(
+                    name=name,
+                    price_per_node_hour=scale * price,
+                    hardware={"cpu"},
+                    speed={"cpu": speed},
+                )
+                for name, price, speed in (("low", 0.5, 2.0), ("high", 2.0, 1.0))
+            ]
+
+        traces = {"tioga": _DATA / "trace.csv"}
+        options = {"start": 1000, "hours": 0.05, "seed": 4, "gpu_fraction": 0.0}
+        for bids in ("single", "multi"):
+            jobs, _ = prepare(traces, platforms=profiles(1), bids=bids, **options)
+            again, _ = prepare(traces, platforms=profiles(2), bids=bids, **options)
+            for job, other in zip(jobs, again):
+                with self.subTest(bids=bids, job=job.job_id):
+                    if bids == "single":
+                        self.assertAlmostEqual(other.bid, 2 * job.bid, places=3)
+                        continue
+                    for name in ("low", "high"):
+                        self.assertAlmostEqual(
+                            other.bid[name], 2 * job.bid[name], places=3
+                        )
+
+    def test_multi_bids_can_differ_by_platform_or_agree(self) -> None:
+        """One user can be a whale on one platform and under the price on another."""
+        with tempfile.TemporaryDirectory() as directory:
+            trace = _simple(directory, [f"{row},1,60,-\n" for row in range(300)])
+            jobs, _ = prepare(
+                {"simple": trace},
+                platforms=PLATFORMS,
+                bids="multi",
+                trace_format="simple",
+            )
+        prices = {item.name: item.price_per_node_hour for item in PLATFORMS}
+        ratios = [[bid / prices[name] for name, bid in job.bid.items()] for job in jobs]
+        self.assertTrue(any(max(row) >= 5 and min(row) < 1 for row in ratios))
+        self.assertTrue(any(all(0.5 <= ratio < 2 for ratio in row) for row in ratios))
+
+    def test_preferences_belong_to_the_user_and_platform(self) -> None:
+        """A bid on one platform does not depend on the other platforms listed."""
+        traces = {"tioga": _DATA / "trace.csv"}
+        options = {"bids": "multi", "start": 1000, "hours": 0.05, "seed": 4}
+        names = [("corona", "tioga"), ("tioga", "corona"), ("tioga",)]
+        tioga = [
+            [
+                job.bid["tioga"]
+                for job in prepare(
+                    traces, platforms=[_PROFILES[name] for name in listed], **options
+                )[0]
+            ]
+            for listed in names
+        ]
+        self.assertEqual(tioga[0], tioga[1])
+        self.assertEqual(tioga[0], tioga[2])
 
     def test_limit_is_the_run_time_or_else_the_request(self) -> None:
         """The limit is the run time, or the request when the trace has none."""
         with tempfile.TemporaryDirectory() as directory:
-            trace = Path(directory) / "simple.csv"
-            trace.write_text(
-                "job_submit_time,num_nodes,time_limit,actual_run_time\n"
-                "0,1,120,40\n"
-                "1,1,60,\n",
-                encoding="utf-8",
+            trace = _simple(
+                directory,
+                ["0,1,120,40\n", "1,1,60,\n"],
+                "job_submit_time,num_nodes,time_limit,actual_run_time",
             )
             jobs, _ = prepare(
-                {"simple": trace},
-                reference_price=_REFERENCE_PRICE,
-                trace_format="simple",
+                {"simple": trace}, platforms=PLATFORMS, trace_format="simple"
             )
         self.assertEqual([job.limit_s for job in jobs], [40, 60])
         self.assertEqual([job.runtime_s for job in jobs], [40, None])
         self.assertEqual([job.requested_s for job in jobs], [120, 60])
 
     def test_a_row_without_a_user_is_its_own_user(self) -> None:
-        """A row without a user draws its persona and job terms independently."""
+        """A row without a user draws its persona and hardware independently."""
         with tempfile.TemporaryDirectory() as directory:
-            trace = Path(directory) / "simple.csv"
-            trace.write_text(
-                "job_submit_time,num_nodes,time_limit,user\n"
-                + "".join(f"{second},1,60,-\n" for second in range(400)),
-                encoding="utf-8",
-            )
+            trace = _simple(directory, [f"{row},1,60,-\n" for row in range(400)])
             jobs, _ = prepare(
-                {"simple": trace},
-                reference_price=_REFERENCE_PRICE,
-                trace_format="simple",
+                {"simple": trace}, platforms=PLATFORMS, trace_format="simple"
             )
-        stickers = [job for job in jobs if job.persona == "sticker"]
-        tiers = [job for job in jobs if job.persona == "tier"]
         self.assertEqual({job.user for job in jobs}, {""})
-        self.assertEqual({bool(job.requires) for job in stickers}, {False, True})
-        self.assertTrue(any(job.bid > _REFERENCE_PRICE for job in tiers))
-
-    def test_per_platform_persona_bids_scale_with_speed(self) -> None:
-        """Mapped persona bids include the selected hardware's speed."""
-        traces = {"tioga": _DATA / "trace.csv"}
-        options = {
-            "reference_price": _REFERENCE_PRICE,
-            "start": 1000,
-            "hours": 0.05,
-            "seed": 4,
-            "requires": "gpu",
-            "per_platform": ("corona", "dane", "matrix"),
-        }
-        unit, _ = prepare(traces, speeds=_UNIT_SPEEDS, **options)
-        scaled, _ = prepare(traces, speeds=_SPEEDS, **options)
-        self.assertEqual(unit[0].bid["corona"], scaled[0].bid["corona"])
-        self.assertNotIn("dane", scaled[0].bid)
-        self.assertAlmostEqual(
-            scaled[0].bid["matrix"] / unit[0].bid["matrix"],
-            _SPEEDS["matrix"]["gpu"],
-            places=3,
-        )
+        for persona in ("sticker", "whale"):
+            with self.subTest(persona=persona):
+                self.assertEqual(
+                    {bool(job.requires) for job in jobs if job.persona == persona},
+                    {False, True},
+                )
 
     def test_job_draws_follow_trace_row_identity(self) -> None:
         """Changing the interval does not change a retained row's draws."""
@@ -335,7 +414,7 @@ class JobTests(unittest.TestCase):
                         encoding="utf-8",
                     )
                     options = {
-                        "reference_price": _REFERENCE_PRICE,
+                        "platforms": PLATFORMS,
                         "trace_format": "simple",
                         "seed": 8,
                     }
@@ -356,19 +435,18 @@ class JobTests(unittest.TestCase):
                         ),
                     )
 
-    def test_command_line_prices_on_the_mean_posted_price(self) -> None:
-        """The command line anchors every persona on the mean posted price."""
+    def test_command_line_bids_on_the_default_federation(self) -> None:
+        """The command line bids on the five default platforms unless told."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            trace = root / "simple.csv"
-            trace.write_text(
-                "job_id,job_submit_time,num_nodes,time_limit,user\n"
-                "stable,100,2,60,fixed-user\n",
-                encoding="utf-8",
+            trace = _simple(
+                directory,
+                ["stable,100,2,60,fixed-user\n"],
+                "job_id,job_submit_time,num_nodes,time_limit,user",
             )
             direct, _ = prepare(
                 {"community": trace},
-                reference_price=_REFERENCE_PRICE,
+                platforms=[_PROFILES[name] for name in DEFAULT_FEDERATION],
                 trace_format="simple",
                 seed=8,
             )

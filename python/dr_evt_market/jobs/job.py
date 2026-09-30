@@ -64,12 +64,13 @@ def read_jobs(path: str | Path) -> list[Job]:
             platform_bid = {
                 name[4:]: float(row[name]) for name in bid_fields if row[name] != ""
             }
+            scalar = row.get("bid") or ""
             job = Job(
                 row["job_id"],
                 int(row["job_submit_time"]),
                 int(row["num_nodes"]),
                 int(row["time_limit"]),
-                platform_bid or float(row["bid"]),
+                platform_bid if platform_bid or not scalar else float(scalar),
                 frozenset((row.get("requires") or "").split()),
                 None if runtime in (None, "") else int(runtime),
                 None if requested in (None, "") else int(requested),

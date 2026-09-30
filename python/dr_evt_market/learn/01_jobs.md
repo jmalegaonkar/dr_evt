@@ -60,8 +60,8 @@ Inside it, the first matching reason drops the row:
 3. `no_start`: the job never ran;
 4. `bad_runtime`: a run time under 1 s, including an end before the start.
 
-The summary that `prepare` returns, and the command prints, counts each reason and the
-jobs kept from each source.
+The summary that `prepare` returns, and the command prints, counts each reason, the
+jobs kept from each source, and the kept jobs of each persona (step 2).
 
 Not cleaned:
 
@@ -85,18 +85,12 @@ Not cleaned:
 - **Labels.** `source` is the trace's name, `user` is the trace's user (empty when it
   has none), and `persona` comes from the bid rule (step 2).
 
-Every random draw comes from one of two generators, each seeded by a SHA-256 hash of its
-key:
-
-- the **row's generator**, keyed by the seed, the source and the row's identity. It
-  draws the tier urgency or the value multiple (step 2), then the hardware;
-- the **user's generator**, keyed by the seed, the source and the user. It draws the
-  persona, the heavy-user flag and the machine preferences (step 2).
-
-Neither key contains the job number, so a row keeps its draws whatever interval is
-selected. The source is part of both keys, so the same user name in two traces is two
-users. A row without a user is its own user: all its draws come, one after another,
-from the row's generator.
+Every random draw comes from a generator seeded by a SHA-256 hash of the seed, the
+source and a key; step 2 (`02_bids.md`) lists them all. The hardware is the first draw
+of the row's generator, keyed by the row's identity, and it is made even when
+`--requires` overrides it, so no other draw moves. No key contains the job number, so a
+row keeps its draws whatever interval is selected. The source is part of every key, so
+the same user name in two traces is two users.
 
 `write_jobs` writes the jobs file with fixed columns, plus one `bid:<platform>` column
 per platform when bids are per platform. `read_jobs` reads it back in row order and
@@ -111,7 +105,7 @@ merged order, and a row's file position counts data rows from 0.
 | file position | name | what matters | submit / request / run | outcome |
 |---:|---|---|---|---|
 | 1 | before | submitted at 990.7 | 990 / 45 / 30 | `outside_interval` |
-| 3 | bravo | user limit blank, system limit 120.9 | 1005 / 120 / 40 | **j000001** at 0 s, CPU |
+| 3 | bravo | user limit blank, system limit 120.9 | 1005 / 120 / 40 | **j000001** at 0 s, GPU |
 | 5 | missing-nodes | nodes `-` | 1010 / 30 / 20 | `no_nodes` |
 | 6 | never-one | `t_run` is `-` | 1020 / 300 / none | `no_start` |
 | 4 | never-two | `t_run` is `-` | 1030 / 300 / none | `no_start` |
@@ -126,6 +120,7 @@ merged order, and a row's file position counts data rows from 0.
 The summary reads 12 rows and keeps 5, all from `tioga`: `no_nodes` 1, `no_limit` 1,
 `no_start` 2, `bad_runtime` 1, `outside_interval` 2. Golf is inside because its submit
 time is floored before the check, and boundary is outside because the end is excluded.
+The kept jobs are 1 sticker, 3 tier and 1 value job.
 
 From the repository's `python/` directory,
 
@@ -138,15 +133,16 @@ writes
 
 ```text
 job_id,job_submit_time,num_nodes,time_limit,bid,requires,runtime,requested,source,user,persona
-j000001,0,6,40,1.234,,40,120,tioga,2,tier
-j000002,35,4,40,1.234,gpu,40,60,tioga,1,sticker
-j000003,85,3,70,4.4609,gpu,70,80,tioga,6,value
-j000004,115,8,50,1.234,,50,90,tioga,5,tier
-j000005,174,1,15,1.234,gpu,15,20,tioga,10,tier
+j000001,0,6,40,0.5934,gpu,40,120,tioga,2,tier
+j000002,35,4,40,0.5934,gpu,40,60,tioga,1,sticker
+j000003,85,3,70,4.0325,gpu,70,80,tioga,6,value
+j000004,115,8,50,0.832,,50,90,tioga,5,tier
+j000005,174,1,15,0.5934,gpu,15,20,tioga,10,tier
 ```
 
-Each limit is the run time: j000001 asked for 120 s and ran 40 s. The bids are step 2:
-1.234 is the reference price, and value user 6 bids a multiple of it.
+Each limit is the run time: j000001 asked for 120 s and ran 40 s. The bids are step 2
+(`02_bids.md`): single bids by default, and one `bid:<platform>` column per platform
+with `--bids multi`.
 
 ## 1.7 Modelling choices
 

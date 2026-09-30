@@ -31,10 +31,11 @@ persona. Required jobs-file columns are `job_id`, `job_submit_time`, `num_nodes`
 `time_limit`, and `bid`. Optional columns are `bid:<platform>`, `requires`, `runtime`,
 `requested`, `source`, `user`, and `persona`.
 
-Unknown columns are ignored. A scalar `bid` is a maximum price per reference node-hour
-on every platform. A `bid:<platform>` is a maximum price per node-hour on that
-platform. If any mapped bid cell is filled, only those named platforms are bid on and
-the scalar cell is ignored.
+Unknown columns are ignored. A single bid, the `bid` column, is a maximum price per
+reference node-hour on every platform. A multi bid gives a maximum price per node-hour
+on each platform in `bid:<platform>` columns. If any `bid:<platform>` cell is filled,
+only those platforms are bid on and the `bid` cell is ignored. A row with no bid in any
+cell bids on no platform.
 
 Prepared rows form one anonymous stream. `source` remains a label for analysis; it
 does not select a platform or determine a job's hardware. The traces do not identify
@@ -48,39 +49,59 @@ Its cost and the two bid forms' values are:
 
 ```text
 cost(p)         = posted_price(p) * nodes * limit / speed(p) / 3600
-scalar_value(p) = bid              * nodes * limit            / 3600
-mapped_value(p) = bid(p)           * nodes * limit / speed(p) / 3600
+single_value(p) = bid              * nodes * limit            / 3600
+multi_value(p)  = bid(p)           * nodes * limit / speed(p) / 3600
 ```
 
-Trace preparation anchors every synthetic private price on the mean posted price of the
-five-profile default federation. A seed, source, and pseudonymous user select a
-persistent persona; a row without a user is its own user. The trace's job identifier, or
-its source and original file order when it has no identifier, controls each job's random
-draws. Generated job numbers therefore do not change those draws when the selected
-interval changes. Per-platform bids also apply a persistent user preference for each
-machine and scale the offered hourly price by that machine's speed for the job.
+Trace preparation writes single bids, or multi bids with `--bids multi`. A seed, source,
+and pseudonymous user select a persistent persona; a row without a user is its own user.
+Each persona bids a multiple of a price:
 
-| Persona | Share | Price per node-hour |
+| Persona | Share of users | Multiple |
 |---|---:|---|
-| sticker | 45% | Reference price |
-| tier | 35% | Reference price, 2x when urgent, or 4x when urgent and heavy |
-| value | 15% | Reference price times a lognormal multiple with median 3.0 and sigma 0.5 |
-| whale | 5% | Ten times the reference price |
+| sticker | 45% | 1 |
+| tier | 35% | 1, 2 when urgent, or 4 when urgent and heavy |
+| value | 15% | A lognormal multiple per job with median 3.0 and sigma 0.5 |
+| whale | 5% | 10 |
 
 An urgent tier job occurs with probability 20 percent. A tier user is a heavy premium
-user with probability 20 percent. Preparation uses the historical run time as the
-execution limit, or the requested limit when a trace has no run time. A job is priced,
-released and valued on that run time, so users pay for what they use; the requested
-limit is carried in `requested` but otherwise unused.
+user with probability 20 percent. A single bid is the price level of a unit of work, the
+mean over the platforms that have the job's hardware of the posted price divided by the
+speed, times the user's multiple. A multi bid gives each such platform the posted price
+times a multiple times the user's persistent preference for that platform,
+`exp(N(0, 0.3))`. Each platform takes the user's own persona half the time and draws its
+own otherwise, so a user can be a whale on one platform and bid under the price on
+another:
+
+```text
+single: bid    = mean(posted_price(p) / speed(p)) * multiple
+multi:  bid(p) = posted_price(p) * multiple(persona on p) * preference(user, p)
+```
+
+The trace's job identifier, or its source and original file order when it has no
+identifier, keys the job's own draws, which keep fixed places: the hardware, the tier
+urgency, then the value multiple. Generated job numbers therefore do not change those
+draws when the selected interval changes, and neither the persona rule nor `--requires`
+moves them. A platform's draws are keyed by user and platform, so they do not depend on
+the other platforms listed. A single bid's surplus, value minus cost, is largest where
+the job costs least; a multi bid's, `(multiple * preference - 1) * cost(p)`, grows with
+the platform's cost. The preparation summary counts the kept jobs of each persona.
+
+Preparation uses the historical run time as the execution limit, or the requested limit
+when a trace has no run time. A job is priced, released and valued on that run time, so
+users pay for what they use; the requested limit is carried in `requested` but otherwise
+unused.
 
 ## Mechanism and loop
 
-`candidates` keeps platforms that match the hardware, have enough free nodes, were
-bid on, and have a reported value that covers cost. `Vcg` maximizes total reported
-value minus platform cost subject to one platform per job and node capacity. Its
-Clarke pivot is the second price generalized to several platforms with capacity. A job
-whose reported value exactly covers cost adds nothing to that total; it takes nodes
-the winners leave free, in queue order, and pays the posted cost.
+A platform is a candidate for a job when the job can be placed there now: it has the
+job's hardware and enough free nodes. `candidates` lists them whatever the job bids.
+`offers` keeps the candidates the job bid on whose reported value covers the cost: the
+placements its bid can win. `Vcg` maximizes total reported value minus platform cost
+over the offers, subject to one platform per job and node capacity. Its Clarke pivot is
+the second price generalized to several platforms with capacity. A job whose reported
+value exactly covers cost adds nothing to that total; it takes nodes the winners leave
+free, in queue order, and pays the posted cost.
 
 VCG lets users keep the savings between their values and the charges above posted
 cost. Pay what you bid assigns offers greedily and gives that surplus to the center.
@@ -93,19 +114,19 @@ cost. Comparisons therefore change the allocation rule without changing capacity
 the workload.
 
 `RegretFormer` is a learned mechanism: the network of Ivanov et al. (NeurIPS 2022) over
-a grid of jobs by platforms. For each job it gives a probability for every candidate
-platform and for waiting, and a payment fraction. The market takes the most probable
-cells first and places a job on the first of its platforms that still has the nodes.
-Waiting only lowers a job's place in that order: a job stays in the queue only when
-none of its platforms has room left, and is never turned away. A winner pays its cost
-plus its payment fraction of the difference between its value and that cost. It needs
-`torch`; `RegretFormer(path)` loads a saved network and `RegretFormer(seed=0)` builds
-an untrained one.
+a grid of jobs by platforms. For each job it gives a probability for every platform it
+has an offer on and for waiting, and a payment fraction. The market takes the most
+probable cells first and places a job on the first of its platforms that still has the
+nodes. Waiting only lowers a job's place in that order: a job stays in the queue only
+when none of its platforms has room left, and is never turned away. A winner pays its
+cost plus its payment fraction of the difference between its value and that cost. It
+needs `torch`; `RegretFormer(path)` loads a saved network and `RegretFormer(seed=0)`
+builds an untrained one.
 
 `grid_regret(mechanism, jobs, platforms, free_nodes)` measures, for one window, how
 much each job could gain by misreporting while the others report truthfully, on the
 decisions the market applies. It moves one price at a time over a grid that includes
-the posted prices, where a job's candidates change, then scales the whole report: the
+the posted prices, where a job's offers change, then scales the whole report: the
 item-wise grid of You et al. (2026). The result is a lower bound on the regret. VCG
 reads zero; pay what you bid reads up to each winner's surplus over the posted price.
 `refined_regret(regretformer, ...)` adds their guided gradient refinement for the
@@ -124,15 +145,16 @@ regret that training reports is measured on the relaxed network and can be far b
 that of the mechanism the market applies: judge a trained network by `refined_regret`
 on windows it was not trained on.
 
-At each fixed window, the market advances every platform, admits arrivals, auctions
-the first `prefix` queued jobs that have a candidate at the current free nodes, submits
-winners, and advances again; jobs without a current candidate are skipped for the
-window without losing their queue position. A mechanism must place every batch job
-that still fits the nodes left over, so a job waits only when no platform has room for
-it; anything else raises `MarketError`. The market's guarantee is that every accepted
-winner starts in its market window. Per-job begin and end are recorded by the market
-from that guarantee, not read from `dr_evt`, and streamed jobs run their speed-adjusted
-limit.
+At each fixed window, the market advances every platform, admits arrivals, auctions the
+first `prefix` queued jobs that can be placed now, submits winners, and advances again;
+a job that cannot be placed anywhere now is skipped for the window without losing its
+queue position. Who takes part therefore depends only on public facts, never on bids: a
+job whose bid cannot cover the price where it fits takes part and loses. A mechanism
+must place every batch job that has an offer on the nodes left over, so a job waits only
+when no platform it can win has room; anything else raises `MarketError`. The market's
+guarantee is that every accepted winner starts in its market window. Per-job begin and
+end are recorded by the market from that guarantee, not read from `dr_evt`, and streamed
+jobs run their speed-adjusted limit.
 
 ## Outputs
 
@@ -179,13 +201,14 @@ Prepare one merged interval from LC traces:
 ```bash
 python -m dr_evt_market prepare \
   --trace corona=/path/to/corona.csv --trace tioga=/path/to/tioga.csv \
-  --out jobs.csv --hours 24 --seed 0 --gpu-fraction 0.5 \
-  --per-platform corona,dane,matrix,tioga,tuolumne
+  --out jobs.csv --hours 24 --seed 0 --gpu-fraction 0.5
 ```
 
 The interval starts at the earliest submission unless `--start` gives a time in the
-traces' own clock, which is epoch seconds for LC traces. Use `--format simple` for the
-simple trace format. Trace sources are community labels and need not name profiles.
+traces' own clock, which is epoch seconds for LC traces. Bids are single bids over the
+five default platforms; `--bids multi` writes a bid per platform instead, and
+`--platforms` names other platforms. Use `--format simple` for the simple trace format.
+Trace sources are community labels and need not name profiles.
 
 ## Tests and notebook
 

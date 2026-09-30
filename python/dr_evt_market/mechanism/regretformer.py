@@ -7,7 +7,7 @@
 
 """RegretFormer as a market mechanism: a learned allocation and learned premiums."""
 
-from .base import Decision, Mechanism, candidates
+from .base import Decision, Mechanism, offers
 
 
 class RegretFormer(Mechanism):
@@ -42,7 +42,7 @@ class RegretFormer(Mechanism):
             if assignment[0, index] < 0:
                 continue
             name = names[assignment[0, index]]
-            cost, value = candidates(job, platforms, free_nodes)[name]
+            cost, value = offers(job, platforms, free_nodes)[name]
             charge = cost + fractions[0, index] * (value - cost)
             decisions.append(Decision(job.job_id, name, float(charge)))
         return decisions

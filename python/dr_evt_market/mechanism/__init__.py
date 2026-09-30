@@ -5,9 +5,9 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Mechanisms: the interface, the candidates a job can take, and the auctions."""
+"""Mechanisms: the interface, candidates and offers, and the auctions."""
 
-from .base import Decision, Mechanism, candidates
+from .base import Decision, Mechanism, candidates, offers
 from .firstfit import FirstFit
 from .firstprice import FirstPrice
 from .regret import grid_regret, refined_regret
@@ -32,6 +32,7 @@ __all__ = [
     "Vcg",
     "candidates",
     "grid_regret",
+    "offers",
     "record_windows",
     "refined_regret",
     "train_regretformer",

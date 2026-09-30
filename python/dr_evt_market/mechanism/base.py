@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""The mechanism interface: decisions, the abstract mechanism, and candidates."""
+"""The mechanism interface: decisions, the abstract mechanism, candidates, offers."""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -30,8 +30,8 @@ class Mechanism(ABC):
         """Return the winning decisions in batch order."""
 
     def offers(self, job, platforms, free_nodes):
-        """Return platforms that may serve a job and their charge bounds."""
-        return candidates(job, platforms, free_nodes)
+        """Return the platforms this mechanism may give a job, with charge bounds."""
+        return offers(job, platforms, free_nodes)
 
 
 def job_value(job, platform) -> float:
@@ -41,16 +41,23 @@ def job_value(job, platform) -> float:
     return price * job.num_nodes * job.limit_s / speed / 3600
 
 
-def candidates(job, platforms, free_nodes) -> dict[str, tuple[float, float]]:
-    """Return feasible platform offers as cost and value pairs."""
-    offers = {}
-    for name, platform in platforms.items():
-        price = job.price(name)
-        if not platform.fits(job) or price is None or free_nodes[name] < job.num_nodes:
+def candidates(job, platforms, free_nodes) -> list[str]:
+    """Return the platforms where a job can be placed now, whatever it bids."""
+    return [
+        name
+        for name, platform in platforms.items()
+        if platform.fits(job) and job.num_nodes <= free_nodes[name]
+    ]
+
+
+def offers(job, platforms, free_nodes) -> dict[str, tuple[float, float]]:
+    """Return the candidates a job's bid can win, as cost and value pairs."""
+    result = {}
+    for name in candidates(job, platforms, free_nodes):
+        if job.price(name) is None:
             continue
-        cost = platform.cost(job)
-        value = job_value(job, platform)
-        if value + 1.0e-9 < cost:
-            continue
-        offers[name] = (cost, value)
-    return offers
+        cost = platforms[name].cost(job)
+        value = job_value(job, platforms[name])
+        if value + 1.0e-9 >= cost:
+            result[name] = (cost, value)
+    return result

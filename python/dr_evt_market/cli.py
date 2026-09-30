@@ -18,9 +18,6 @@ from .mechanism import MECHANISMS, record_windows, train_regretformer
 from .platform import DEFAULT_FEDERATION, PLATFORMS, federation
 
 _PROFILES = {profile.name: profile for profile in PLATFORMS}
-_DEFAULT_REFERENCE_PRICE = sum(
-    _PROFILES[name].price_per_node_hour for name in DEFAULT_FEDERATION
-) / len(DEFAULT_FEDERATION)
 
 
 def _share(value):
@@ -79,7 +76,8 @@ def _parser():
     prepare_parser.add_argument("--seed", type=int, default=0)
     prepare_parser.add_argument("--gpu-fraction", type=float, default=0.5)
     prepare_parser.add_argument("--requires")
-    prepare_parser.add_argument("--per-platform")
+    prepare_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
+    prepare_parser.add_argument("--bids", choices=("single", "multi"), default="single")
     return parser
 
 
@@ -152,22 +150,16 @@ def _prepare(args):
             raise ValueError(f"trace must be name=path: {item!r}")
         name, path = item.split("=", 1)
         traces[name] = Path(path)
-    per_platform = None
-    speeds = None
-    if args.per_platform is not None:
-        per_platform = _names(args.per_platform)
-        speeds = {name: _PROFILES[name].speed for name in per_platform}
     jobs, summary = prepare(
         traces,
-        reference_price=_DEFAULT_REFERENCE_PRICE,
-        speeds=speeds,
+        platforms=[_PROFILES[name] for name in _names(args.platforms)],
+        bids=args.bids,
         trace_format=args.format,
         start=args.start,
         hours=args.hours,
         seed=args.seed,
         gpu_fraction=args.gpu_fraction,
         requires=args.requires,
-        per_platform=per_platform,
     )
     write_jobs(jobs, args.out)
     for key, value in summary.items():

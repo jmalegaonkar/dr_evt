@@ -16,7 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dr_evt_market import RegretFormer, candidates, federation, read_jobs, run
+from dr_evt_market import RegretFormer, federation, offers, read_jobs, run
 
 _DATA = Path(__file__).with_name("data")
 _ROOT = Path(__file__).resolve().parents[3]
@@ -100,7 +100,7 @@ class RegretFormerTests(unittest.TestCase):
                     self.assertLess(len(placed), len(jobs))
                     for job in jobs:
                         if job.job_id not in placed:
-                            self.assertFalse(candidates(job, platforms, left))
+                            self.assertFalse(offers(job, platforms, left))
 
     def test_seed_and_checkpoint_fix_the_decisions(self) -> None:
         """One seed decides the same twice, and so does its saved network."""

@@ -76,7 +76,7 @@ def train_regretformer(
     a job that fits them waits, since the market places every job that fits.
     Misreports come from the item-wise grid on the relaxed outcome, for up to
     `regret_jobs` jobs per window, instead of gradient ascent: a report that crosses
-    a posted price changes the job's candidates, which gradients cannot see. Returns
+    a posted price changes the job's offers, which gradients cannot see. Returns
     the trained mechanism and each step's history, whose regret is the relaxed
     network's: measure the deployed mechanism with `refined_regret`.
     """
@@ -90,12 +90,12 @@ def train_regretformer(
         raise ValueError("objective must be 'revenue' or 'welfare'")
 
     def outcome(window, prices, truth):
-        channels, candidate = window.features(prices)
-        probabilities, fractions = net(channels, candidate, window.jobs)
+        channels, offer = window.features(prices)
+        probabilities, fractions = net(channels, offer, window.jobs)
         allocation = probabilities[..., : prices.shape[-1]]
         premium = fractions[..., None] * (window.value(prices) - window.cost())
         gain = window.value(truth) - window.cost() - premium
-        waiting = probabilities[..., -1:] * candidate
+        waiting = probabilities[..., -1:] * offer
         return allocation, waiting, premium, (allocation * gain).sum(-1)
 
     def misreported(window, truth, rows, owners, prices):
@@ -173,7 +173,7 @@ def train_regretformer(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         optimizer.step()
-        surplus = (window.value(truth) - window.cost()) * window.candidates(truth)
+        surplus = (window.value(truth) - window.cost()) * window.offers(truth)
         available = (surplus.amax(-1).sum(-1) / scale).mean().item()
         ratio = lost.item() / (available + 1.0e-8)
         change = math.log(ratio) - math.log(target) if ratio > 0 else -math.inf

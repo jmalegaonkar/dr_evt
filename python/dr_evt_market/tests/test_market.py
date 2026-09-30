@@ -231,6 +231,25 @@ class MarketTests(unittest.TestCase):
             {"running": 0, "wide": 120, "narrow": 60},
         )
 
+    def test_a_job_that_can_be_placed_takes_part_and_may_lose(self) -> None:
+        """The batch is public: a job that fits now takes its place even if it loses."""
+        jobs = [
+            Job("big", 0, 115, 168, {"tuolumne": 1.0}),
+            Job("poor", 0, 1, 60, {"corona": 0.5, "tuolumne": 1.0}),
+            Job("rich", 0, 1, 60, {"corona": 5.0}),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(
+                Path(directory), share=0.1, names=("corona", "tuolumne")
+            )
+            result = run(jobs, platforms, Vcg(), window_s=60, prefix=1)
+        # At 60 s only Corona has room: poor fits there but bids under its price,
+        # so it takes the one place in the batch, loses, and rich waits behind it.
+        self.assertEqual(
+            {row.job_id: row.begin_s for row in result.routed},
+            {"big": 0, "poor": 120, "rich": 180},
+        )
+
     def test_invalid_mechanism_decisions_raise(self) -> None:
         """Outside-batch and over-capacity decisions violate the guarantee."""
         jobs = read_jobs(_DATA / "jobs.csv")
@@ -370,8 +389,10 @@ class MarketTests(unittest.TestCase):
                     "1000",
                     "--hours",
                     "0.05",
-                    "--per-platform",
+                    "--platforms",
                     "corona,matrix",
+                    "--bids",
+                    "multi",
                     "--gpu-fraction",
                     "0",
                 ],
@@ -385,6 +406,7 @@ class MarketTests(unittest.TestCase):
             self.assertEqual(len(jobs), 10)
             self.assertEqual({job.source for job in jobs}, {"corona", "tioga"})
             self.assertTrue(all(not job.requires for job in jobs))
+            self.assertTrue(all(list(job.bid) == ["corona", "matrix"] for job in jobs))
 
 
 if __name__ == "__main__":

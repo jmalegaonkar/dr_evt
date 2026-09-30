@@ -13,7 +13,7 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .mechanism import Decision, Mechanism
+from .mechanism import Decision, Mechanism, candidates
 from .mechanism.base import job_value
 
 _TOLERANCE = 1.0e-9
@@ -108,7 +108,7 @@ def _check_decisions(
             raise MarketError(f"{decision.job_id}: not in the batch")
         offer = mechanism.offers(job, platforms, free_nodes).get(decision.platform)
         if offer is None:
-            raise MarketError(f"{decision.job_id}: platform is not a candidate")
+            raise MarketError(f"{decision.job_id}: no offer on this platform")
         cost, maximum_charge = offer
         value = job_value(job, platforms[decision.platform])
         if not cost - _TOLERANCE <= decision.charge <= maximum_charge + _TOLERANCE:
@@ -193,9 +193,11 @@ def run(
             arrival += 1
 
         free = {name: platform.free_nodes() for name, platform in platforms.items()}
+        # Who takes part depends only on public facts: a job that can be placed now
+        # is auctioned even where its bid cannot cover the price, and loses there.
         batch = []
         for job in queue:
-            if mechanism.offers(job, platforms, free):
+            if candidates(job, platforms, free):
                 batch.append(job)
                 if len(batch) == prefix:
                     break

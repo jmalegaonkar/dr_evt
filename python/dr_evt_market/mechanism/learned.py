@@ -58,7 +58,7 @@ class Window:
         work = (self.nodes * self.hours).unsqueeze(-1) / self.speeds
         return prices * work
 
-    def candidates(self, prices: torch.Tensor) -> torch.Tensor:
+    def offers(self, prices: torch.Tensor) -> torch.Tensor:
         """Return the cells that fit now and whose price covers the posted price."""
         return (
             self.fits
@@ -67,21 +67,21 @@ class Window:
         )
 
     def features(self, prices: torch.Tensor):
-        """Return the network's input channels and the candidate cells."""
+        """Return the network's input channels and the offer cells."""
         cost = self.cost()
         scale = self.scale().view(-1, 1, 1)
-        candidate = self.candidates(prices)
+        offer = self.offers(prices)
         channels = torch.stack(
             [
                 self.value(prices) / scale,
                 cost / scale,
                 (self.nodes.unsqueeze(-1) / self.exposed.unsqueeze(1)).expand_as(cost),
                 (self.free / self.exposed).unsqueeze(1).expand_as(cost),
-                candidate.double(),
+                offer.double(),
             ],
             dim=-1,
         )
-        return channels.float(), candidate
+        return channels.float(), offer
 
 
 def window(batches, platforms) -> Window:
@@ -193,7 +193,7 @@ class Network(nn.Module):
         self.encode_platforms = nn.Linear(hid, hid, bias=False)
         self.payment = nn.Linear(hid, 1)
 
-    def forward(self, channels, candidate, jobs):
+    def forward(self, channels, offer, jobs):
         """Return option probabilities, waiting last, and payment fractions."""
         x = torch.tanh(self.embed(channels, jobs))
         for block in self.blocks:
@@ -202,8 +202,8 @@ class Network(nn.Module):
         per_job = self.encode_jobs(x).mean(2)
         per_platform = _mean_over_jobs(self.encode_platforms(x), jobs).squeeze(1)
         logits = per_job @ per_platform.transpose(1, 2) / math.sqrt(x.shape[-1])
-        logits = logits.masked_fill(~candidate, float("-inf"))
-        waiting = -logits.masked_fill(~candidate, 0.0).sum(-1, keepdim=True)
+        logits = logits.masked_fill(~offer, float("-inf"))
+        waiting = -logits.masked_fill(~offer, 0.0).sum(-1, keepdim=True)
         probabilities = torch.softmax(torch.cat([logits, waiting], dim=-1), dim=-1)
         return probabilities, torch.sigmoid(self.payment(per_job)).squeeze(-1)
 
@@ -228,8 +228,8 @@ def load(path) -> Network:
     return net.eval()
 
 
-def _round(probabilities, candidate, nodes, free):
-    size, platforms = candidate.shape
+def _round(probabilities, offer, nodes, free):
+    size, platforms = offer.shape
     left = free.copy()
     assignment = np.full(size, -1)
     order = np.argsort(-probabilities[:, :platforms], axis=None, kind="stable")
@@ -237,7 +237,7 @@ def _round(probabilities, candidate, nodes, free):
         job, platform = divmod(int(flat), platforms)
         if (
             assignment[job] < 0
-            and candidate[job, platform]
+            and offer[job, platform]
             and nodes[job] <= left[platform]
         ):
             assignment[job] = platform
@@ -254,15 +254,15 @@ def deploy(net: Network, window: Window, prices: torch.Tensor):
     place in that order: a job stays in the queue only when none of its platforms
     has room left.
     """
-    channels, candidate = window.features(prices)
-    probabilities, fractions = net(channels, candidate, window.jobs)
+    channels, offer = window.features(prices)
+    probabilities, fractions = net(channels, offer, window.jobs)
     probabilities = probabilities.numpy()
-    candidate = candidate.numpy()
+    offer = offer.numpy()
     nodes = window.nodes.numpy()
     free = window.free.numpy()
     assignment = np.stack(
         [
-            _round(probabilities[row], candidate[row], nodes[row], free[row])
+            _round(probabilities[row], offer[row], nodes[row], free[row])
             for row in range(len(probabilities))
         ]
     )

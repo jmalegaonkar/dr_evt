@@ -10,7 +10,7 @@
 import math
 from numbers import Real
 
-from .bids import generator, persona_terms, price_bid
+from .bids import PERSONAS, generator, multi_bid, single_bid, terms
 from .job import Job
 from .traces import read_lc, read_simple
 
@@ -30,24 +30,26 @@ def _drop_reason(row):
 def prepare(
     traces,
     *,
-    reference_price,
-    speeds=None,
+    platforms,
+    bids="single",
     trace_format="lc",
     start=None,
     hours=None,
     seed=0,
     gpu_fraction=0.5,
     requires=None,
-    per_platform=None,
 ) -> tuple[list[Job], dict[str, int]]:
-    """Prepare deterministic jobs from one interval across named traces."""
+    """Prepare deterministic jobs from one interval across named traces.
+
+    `platforms` are the profiles bid on, each with a `name`, a posted
+    `price_per_node_hour`, its `hardware` and its `speed`. `bids` is "single" or
+    "multi".
+    """
     readers = {"lc": read_lc, "simple": read_simple}
     if trace_format not in readers:
         raise ValueError("trace_format must be 'lc' or 'simple'")
-    if per_platform is not None and (
-        speeds is None or any(name not in speeds for name in per_platform)
-    ):
-        raise ValueError("per-platform bids need every platform's speeds")
+    if bids not in {"single", "multi"}:
+        raise ValueError("bids must be 'single' or 'multi'")
     if (
         isinstance(gpu_fraction, bool)
         or not isinstance(gpu_fraction, Real)
@@ -77,6 +79,7 @@ def prepare(
         "outside_interval": len(records) - len(selected),
     }
     summary.update({f"kept:{source}": 0 for source in traces})
+    summary.update({f"persona:{name}": 0 for name in PERSONAS})
 
     kept = []
     for record in selected:
@@ -91,25 +94,27 @@ def prepare(
     jobs = []
     for index, record in enumerate(kept, start=1):
         job_rng = generator(seed, record.source, record.identity)
-        persona, persona_price, preference_rng = persona_terms(
-            seed, record.source, record.user, reference_price, job_rng
-        )
+        # The hardware draw comes first and is always made, so neither an override
+        # nor the bid rule moves any other draw.
+        gpu = job_rng.random() < gpu_fraction
         requirement_set = requirement_override
         if requirement_set is None:
-            requirement_set = (
-                frozenset({"gpu"}) if job_rng.random() < gpu_fraction else frozenset()
-            )
-        hardware = "gpu" if "gpu" in requirement_set else "cpu"
-        job_speeds = (
-            None
-            if per_platform is None
-            else {
-                name: speeds[name][hardware]
-                for name in per_platform
-                if hardware in speeds[name]
-            }
-        )
-        bid = price_bid(persona_price, per_platform, job_speeds, preference_rng)
+            requirement_set = frozenset({"gpu"}) if gpu else frozenset()
+        job_terms = terms(seed, record.source, record.user, job_rng)
+        usable = [item for item in platforms if requirement_set <= item.hardware]
+        if not usable:
+            bid = {}
+        elif bids == "multi":
+            owner = record.identity if record.user is None else record.user
+            prices = {item.name: item.price_per_node_hour for item in usable}
+            bid = multi_bid(seed, record.source, owner, job_terms, prices)
+        else:
+            # The price level of a unit of work, averaged over the usable platforms.
+            hardware = "gpu" if "gpu" in requirement_set else "cpu"
+            level = sum(
+                item.price_per_node_hour / item.speed[hardware] for item in usable
+            ) / len(usable)
+            bid = single_bid(job_terms, level)
         jobs.append(
             Job(
                 f"j{index:06d}",
@@ -122,9 +127,10 @@ def prepare(
                 record.limit,
                 record.source,
                 record.user or "",
-                persona,
+                job_terms.persona,
             )
         )
         summary[f"kept:{record.source}"] += 1
+        summary[f"persona:{job_terms.persona}"] += 1
     summary["kept"] = len(jobs)
     return jobs, summary

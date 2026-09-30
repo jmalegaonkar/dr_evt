@@ -22,10 +22,10 @@ LC traces --prepare--> jobs.csv --run--> every 60 s: admit arrivals
 - **Mechanisms** decide who runs where and what they pay: VCG (the truthful auction),
   pay what you bid, `FirstFit` (the bid-blind baseline) and RegretFormer (a learned
   mechanism).
-- **The market never turns a job away.** A job waits in the queue until a platform has
-  room for it, and every winner starts in the window it wins.
+- **The market never turns a job away.** A job waits in the queue until a platform it
+  can win has room for it, and every winner starts in the window it wins.
 
-Each step has a detailed page: `01_jobs.md` for step 1.
+Each step has a detailed page: `01_jobs.md` for step 1 and `02_bids.md` for step 2.
 
 ## 1. Jobs: sourcing and cleaning
 
@@ -46,7 +46,7 @@ Code: `jobs/traces.py` (`read_lc`, `read_simple`) and `jobs/prepare.py` (`prepar
 - **Clock and ids.** Times are shifted so that the first kept job arrives at 0, and
   jobs are numbered `j000001`, `j000002`, and so on.
 - **Hardware.** The traces do not say which jobs use GPUs, so each job requires `gpu`
-  with probability 0.5, drawn from a generator seeded by the job's identity.
+  with probability 0.5: the first draw of a generator seeded by the job's identity.
   `--requires` sets one requirement for the whole file instead.
 - **Limit.** A job's limit is its recorded run time, or its request when the trace has
   none, so it is priced and released on its actual use; the request is carried in
@@ -57,30 +57,35 @@ Code: `jobs/traces.py` (`read_lc`, `read_simple`) and `jobs/prepare.py` (`prepar
 
 ## 2. Bids: the synthetic willingness to pay
 
-Code: `jobs/bids.py` (`persona_terms`, `price_bid`), and the reference price in
-`cli.py`.
+Code: `jobs/bids.py` (`terms`, `single_bid`, `multi_bid`) and the job loop of
+`jobs/prepare.py`. Details: `02_bids.md`.
 
 - **Units.** A bid is the most a user will pay per node-hour, in the unit of the
   posted prices. What a job pays is set by the mechanism, and the market checks that
   it lies between the job's cost and its value.
-- **Reference price.** Prices start from the mean posted price of the five machines,
-  1.234 per node-hour.
 - **Persona.** Each user draws one persona, keyed by the seed, source and user, so a
   user keeps it across jobs. A row without a user is its own user.
 
-  | persona | share of users | price per reference node-hour |
+  | persona | share of users | multiple |
   |---|---:|---|
-  | sticker | 45% | 1 x reference |
-  | tier | 35% | 1 x; 2 x if urgent (20% of jobs); 4 x if also a heavy user (20%) |
-  | value | 15% | reference x lognormal multiple, median 3, sigma 0.5 |
-  | whale | 5% | 10 x reference |
+  | sticker | 45% | 1 |
+  | tier | 35% | 1; 2 if urgent (20% of jobs); 4 if also a heavy user (20%) |
+  | value | 15% | lognormal per job, median 3, sigma 0.5 |
+  | whale | 5% | 10 |
 
-  The per-job draws (urgency, the value multiple, the hardware) are keyed by the trace
-  row's identity, so a job keeps its bid whatever interval is selected.
-- **Two bid forms.** A scalar bid is one price per reference node-hour, valid on every
-  platform. A per-platform bid (`--per-platform`) gives each machine the persona price
-  times that machine's speed for the job's hardware, times a persistent per-user
-  preference factor `exp(N(0, 0.3))`.
+- **Single bid** (the default). One price per reference node-hour, valid on every
+  machine: the mean posted price of a unit of work over the machines that can run the
+  job, times the persona's multiple. A sticker bids 0.832 for a CPU job and 0.5934 for
+  a GPU job.
+- **Multi bid** (`--bids multi`). A price on each machine that has the job's hardware:
+  its posted price times a multiple times the user's preference for that machine,
+  `exp(N(0, 0.3))`. Each machine takes the user's own persona half the time and draws
+  its own otherwise, so one user can be a whale on one machine, near the price on
+  another and under it on a third, or alike on all of them.
+- **Draws.** The job's own draws (hardware, urgency, value multiple) come from its
+  row's generator in fixed places, so a job keeps its bid whatever interval is
+  selected, and the persona rule never moves its hardware. A machine's draws are keyed
+  by user and machine. `--platforms` chooses the machines, all five by default.
 
 ## 3. Platforms
 
@@ -104,17 +109,19 @@ reference node-hour of work on that machine.
   and costs `posted price x nodes x limit / speed / 3600`: the posted price times the
   node-hours it uses there. Dane has no GPUs.
 
-## 4. Value, cost and candidates
+## 4. Value, cost, candidates and offers
 
-Code: `mechanism/base.py` (`job_value`, `candidates`).
+Code: `mechanism/base.py` (`job_value`, `candidates`, `offers`).
 
-- **Value.** A scalar bid is worth `bid x nodes x limit / 3600` on every machine: the
-  job gets the same work done anywhere. A per-platform bid is worth
+- **Value.** A single bid is worth `bid x nodes x limit / 3600` on every machine: the
+  job gets the same work done anywhere. A multi bid is worth
   `bid(p) x nodes x limit / speed(p) / 3600` on machine `p`.
-- **Candidate.** A platform is a candidate for a job when its hardware fits, its free
-  nodes cover the job, the job bid on it, and value covers cost. For a scalar bid the
-  last condition reads `bid >= posted price / speed`: a sticker at 1.234 cannot afford
-  Corona (1.5) or Tioga's CPUs (1.694) but can afford every other machine.
+- **Candidate.** A platform is a candidate for a job when the job can be placed there
+  now: its hardware fits and its free nodes cover the job. Bids play no part.
+- **Offer.** A candidate is an offer when the job bid on it and value covers cost:
+  `bid >= posted price(p) / speed(p)` for a single bid, `bid(p) >= posted price(p)` for
+  a multi bid. A job can win only among its offers. A single-bid sticker covers the
+  machines whose work costs less than the average, and not Corona or Tioga's CPUs.
 
 ## 5. The market loop
 
@@ -126,11 +133,12 @@ Code: `market.py` (`run`, `_check_decisions`, `_blocked_by`).
    `waiting.csv`.
 2. **Each window,** at `t = 0, 60, 120, ...`: advance every platform to `t`, admit the
    jobs that have arrived, read the free nodes, and form the batch: the first 32 queued
-   jobs that have a candidate right now. The others keep their place in the queue.
+   jobs that can be placed now, whatever they bid. The others keep their place in the
+   queue. A batch job without an offer takes part and loses.
 3. **Decision.** The mechanism decides, and the market checks that every job is decided
-   once, belongs to the batch and gets a candidate platform; that its charge lies
-   between its cost and the mechanism's cap; that no platform is over capacity; and that
-   no batch job is left waiting while it fits the nodes left over.
+   once, belongs to the batch and gets a platform it has an offer on; that its charge
+   lies between its cost and the mechanism's cap; that no platform is over capacity;
+   and that no batch job is left waiting while it has an offer on the nodes left over.
 4. **Placement.** Winners are submitted to dr_evt with their speed-adjusted run time.
    After another advance, nothing may be waiting inside dr_evt: every winner starts at
    the window time. The market records `begin = t` and `end = t + run time`, and the
@@ -148,8 +156,8 @@ Code: `market.py` (`run`, `_check_decisions`, `_blocked_by`).
   goes to the platform with room and the lowest speed-adjusted posted cost, and pays
   that cost.
 - **RegretFormer** (`mechanism/regretformer.py`, `mechanism/learned.py`). A network
-  gives each job a probability for every platform and for waiting, and a payment
-  fraction. The market places jobs greedily by probability and charges
+  gives each job a probability for every platform it has an offer on and for waiting,
+  and a payment fraction. The market places jobs greedily by probability and charges
   `cost + fraction x (value - cost)`. Training is in `mechanism/training.py`, and regret
   estimation by item-wise grid and guided refinement in `mechanism/regret.py`.
 

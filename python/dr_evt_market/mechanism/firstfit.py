@@ -7,7 +7,7 @@
 
 """Bid-blind first-fit placement over the federation's exposed slices."""
 
-from .base import Decision, Mechanism
+from .base import Decision, Mechanism, candidates
 
 
 class FirstFit(Mechanism):
@@ -16,13 +16,11 @@ class FirstFit(Mechanism):
     name = "firstfit"
 
     def offers(self, job, platforms, free_nodes):
-        """Return physically available platforms without reading the bid."""
-        offers = {}
-        for name, platform in platforms.items():
-            if platform.fits(job) and job.num_nodes <= free_nodes[name]:
-                cost = platform.cost(job)
-                offers[name] = (cost, cost)
-        return offers
+        """Return every candidate at its posted cost, without reading the bid."""
+        return {
+            name: (platforms[name].cost(job),) * 2
+            for name in candidates(job, platforms, free_nodes)
+        }
 
     def decide(self, jobs, platforms, free_nodes) -> list[Decision]:
         """Return bid-blind first-fit decisions in batch order."""

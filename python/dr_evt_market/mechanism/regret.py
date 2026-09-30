@@ -42,7 +42,7 @@ def _prices(job, names, platforms):
 
 def _misreports(prices, posted, points, span):
     # Pairs of (item, prices): each price moved alone, then the whole report scaled
-    # (item -1). The levels include the posted prices, where the candidates change.
+    # (item -1). The levels include the posted prices, where the offers change.
     top = max(prices)
     levels = [top * span * step / (points - 1) for step in range(points)]
     variants = []
@@ -157,8 +157,8 @@ def refined_regret(
     def relaxed(rows, prices):
         window = base.repeat(len(rows))
         reported = reports(rows, prices)
-        channels, candidate = window.features(reported)
-        probabilities, fractions = net(channels, candidate, window.jobs)
+        channels, offer = window.features(reported)
+        probabilities, fractions = net(channels, offer, window.jobs)
         index, job = torch.arange(len(rows)), torch.as_tensor(rows)
         charged = cost[job] + fractions[index, job, None] * (
             window.value(reported)[index, job] - cost[job]

@@ -9,7 +9,7 @@
 
 from dataclasses import dataclass
 
-from .base import Decision, Mechanism, candidates
+from .base import Decision, Mechanism, offers
 
 _TIE_BREAK = 1.0e-9
 
@@ -32,7 +32,7 @@ def _variables(jobs, platforms, free_nodes, excluded=None):
     variables = []
     index = 0
     for job_index, job in enumerate(jobs):
-        for name, (cost, value) in candidates(job, platforms, free_nodes).items():
+        for name, (cost, value) in offers(job, platforms, free_nodes).items():
             if job_index != excluded:
                 variables.append(
                     _Variable(index, job_index, name, cost, value, job.num_nodes)
@@ -80,11 +80,11 @@ def _solve(jobs, platforms, free_nodes, time_limit_s, excluded=None):
 
 
 def _leftover_offer(job, platforms, free_nodes):
-    offers = candidates(job, platforms, free_nodes)
-    if not offers:
+    left = offers(job, platforms, free_nodes)
+    if not left:
         return None
-    name = max(offers, key=lambda name: offers[name][1] - offers[name][0])
-    return name, offers[name][0]
+    name = max(left, key=lambda name: left[name][1] - left[name][0])
+    return name, left[name][0]
 
 
 class Vcg(Mechanism):

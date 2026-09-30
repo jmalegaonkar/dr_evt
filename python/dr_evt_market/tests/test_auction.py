@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Tests for candidates and the VCG auction."""
+"""Tests for candidates, offers and the auctions."""
 
 import itertools
 import random
@@ -22,6 +22,7 @@ from dr_evt_market import (
     Vcg,
     candidates,
     federation,
+    offers,
 )
 
 _TIE_BREAK = 1.0e-9
@@ -97,15 +98,16 @@ def _instances(count=30):
 
 
 def _brute(jobs, platforms, free_nodes, excluded=None):
-    offers = [candidates(job, platforms, free_nodes) for job in jobs]
+    offered = [offers(job, platforms, free_nodes) for job in jobs]
     indexes = {}
     index = 0
-    for job_index, choices in enumerate(offers):
+    for job_index, choices in enumerate(offered):
         for name in choices:
             indexes[job_index, name] = index
             index += 1
     options = [
-        ((None,) if i == excluded else (None, *offer)) for i, offer in enumerate(offers)
+        ((None,) if i == excluded else (None, *offer))
+        for i, offer in enumerate(offered)
     ]
     best_score, best_choice, best_welfare = float("-inf"), None, 0.0
     for choice in itertools.product(*options):
@@ -118,7 +120,7 @@ def _brute(jobs, platforms, free_nodes, excluded=None):
         if any(used[name] > free_nodes[name] for name in platforms):
             continue
         welfare = sum(
-            offers[i][name][1] - offers[i][name][0]
+            offered[i][name][1] - offered[i][name][0]
             for i, name in enumerate(choice)
             if name is not None
         )
@@ -130,7 +132,7 @@ def _brute(jobs, platforms, free_nodes, excluded=None):
         if score > best_score:
             best_score, best_choice, best_welfare = score, choice, welfare
     chosen = {i: name for i, name in enumerate(best_choice) if name is not None}
-    return chosen, best_welfare, offers
+    return chosen, best_welfare, offered
 
 
 def _value(job, platform, platforms):
@@ -170,19 +172,26 @@ class AuctionTests(unittest.TestCase):
             [("j0", "cheap"), ("j1", "dear")],
         )
 
-    def test_candidates_support_both_bid_forms(self) -> None:
-        """Candidates respect fit, capacity, value and mapped omissions."""
+    def test_offers_support_both_bid_forms(self) -> None:
+        """Candidates are where a job fits now; offers are those its bid covers."""
         with tempfile.TemporaryDirectory() as directory:
             platforms = federation(directory, share=0.1)
             free = {
                 name: platform.exposed_nodes for name, platform in platforms.items()
             }
             scalar = Job("scalar", 0, 4, 360, 3.0, {"gpu"})
-            offers = candidates(scalar, platforms, free)
-            self.assertEqual(list(offers), ["corona", "tuolumne"])
-            self.assertEqual(offers["corona"], (0.6, 1.2))
-            self.assertAlmostEqual(offers["tuolumne"][0], 0.076 / 3.313)
-            self.assertEqual(offers["tuolumne"][1], 1.2)
+            low = Job("low", 0, 4, 360, 1.0, {"gpu"})
+            # Four nodes do not fit the three-node slices of Matrix and Tioga.
+            self.assertEqual(
+                candidates(scalar, platforms, free), ["corona", "tuolumne"]
+            )
+            self.assertEqual(candidates(low, platforms, free), ["corona", "tuolumne"])
+            self.assertEqual(list(offers(low, platforms, free)), ["tuolumne"])
+            found = offers(scalar, platforms, free)
+            self.assertEqual(list(found), ["corona", "tuolumne"])
+            self.assertEqual(found["corona"], (0.6, 1.2))
+            self.assertAlmostEqual(found["tuolumne"][0], 0.076 / 3.313)
+            self.assertEqual(found["tuolumne"][1], 1.2)
             mapped = Job(
                 "mapped",
                 0,
@@ -192,12 +201,12 @@ class AuctionTests(unittest.TestCase):
                 {"gpu"},
             )
             self.assertEqual(
-                list(candidates(mapped, platforms, free)),
+                list(offers(mapped, platforms, free)),
                 ["matrix", "tioga", "tuolumne"],
             )
             free["matrix"] = 1
             self.assertEqual(
-                list(candidates(mapped, platforms, free)), ["tioga", "tuolumne"]
+                list(offers(mapped, platforms, free)), ["tioga", "tuolumne"]
             )
 
     def test_single_bid_value_is_independent_of_platform_speed(self) -> None:
@@ -219,10 +228,10 @@ class AuctionTests(unittest.TestCase):
             ),
         }
         job = Job("scalar", 0, 1, 3600, 3.0, requested_s=7200)
-        offers = candidates(job, platforms, {"slow": 2, "fast": 2})
-        self.assertEqual(offers["slow"][1], 3.0)
-        self.assertEqual(offers["fast"][1], 3.0)
-        self.assertEqual(offers["slow"][0], 2.0 * offers["fast"][0])
+        found = offers(job, platforms, {"slow": 2, "fast": 2})
+        self.assertEqual(found["slow"][1], 3.0)
+        self.assertEqual(found["fast"][1], 3.0)
+        self.assertEqual(found["slow"][0], 2.0 * found["fast"][0])
 
     def test_vcg_matches_brute_force(self) -> None:
         """The optimizer and pivot charges match exhaustive search."""
@@ -230,13 +239,13 @@ class AuctionTests(unittest.TestCase):
         for case, (jobs, platforms, free) in enumerate(_instances()):
             with self.subTest(case=case):
                 actual = mechanism.decide(jobs, platforms, free)
-                chosen, welfare, offers = _brute(jobs, platforms, free)
+                chosen, welfare, offered = _brute(jobs, platforms, free)
                 expected_pairs = [(jobs[i].job_id, name) for i, name in chosen.items()]
                 self.assertEqual(
                     [(item.job_id, item.platform) for item in actual], expected_pairs
                 )
                 actual_welfare = sum(
-                    offers[i][decision.platform][1] - offers[i][decision.platform][0]
+                    offered[i][decision.platform][1] - offered[i][decision.platform][0]
                     for decision in actual
                     for i, job in enumerate(jobs)
                     if job.job_id == decision.job_id
@@ -246,7 +255,7 @@ class AuctionTests(unittest.TestCase):
                     job_index = next(
                         i for i, job in enumerate(jobs) if job.job_id == decision.job_id
                     )
-                    cost, value = offers[job_index][decision.platform]
+                    cost, value = offered[job_index][decision.platform]
                     _, without, _ = _brute(jobs, platforms, free, excluded=job_index)
                     pivot = max(without - (welfare - (value - cost)), 0.0)
                     self.assertAlmostEqual(decision.charge, min(value, cost + pivot))
@@ -331,7 +340,7 @@ class AuctionTests(unittest.TestCase):
         first_price = FirstPrice()
         for case, (jobs, platforms, free) in enumerate(_instances()):
             with self.subTest(case=case):
-                offers = [candidates(job, platforms, free) for job in jobs]
+                offered = [offers(job, platforms, free) for job in jobs]
                 job_indexes = {job.job_id: index for index, job in enumerate(jobs)}
                 decisions = first_price.decide(jobs, platforms, free)
                 indexes = [job_indexes[decision.job_id] for decision in decisions]
@@ -343,7 +352,7 @@ class AuctionTests(unittest.TestCase):
                 for decision in decisions:
                     index = job_indexes[decision.job_id]
                     job = jobs[index]
-                    cost, value = offers[index][decision.platform]
+                    cost, value = offered[index][decision.platform]
                     used[decision.platform] += job.num_nodes
                     welfare += value - cost
                     self.assertAlmostEqual(decision.charge, value)
@@ -351,8 +360,8 @@ class AuctionTests(unittest.TestCase):
 
                 vcg = Vcg().decide(jobs, platforms, free)
                 vcg_welfare = sum(
-                    offers[job_indexes[item.job_id]][item.platform][1]
-                    - offers[job_indexes[item.job_id]][item.platform][0]
+                    offered[job_indexes[item.job_id]][item.platform][1]
+                    - offered[job_indexes[item.job_id]][item.platform][0]
                     for item in vcg
                 )
                 self.assertLessEqual(welfare, vcg_welfare + 1.0e-9)
