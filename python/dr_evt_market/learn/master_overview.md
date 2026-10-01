@@ -25,7 +25,7 @@ LC traces --prepare--> jobs.csv --run--> every 60 s: admit arrivals
 - **The market never turns a job away.** A job waits in the queue until a platform it
   can win has room for it, and every winner starts in the window it wins.
 
-Each step has a detailed page: `01_jobs.md` to `04_offers.md` so far.
+Each step has a detailed page: `01_jobs.md` to `05_loop.md` so far.
 
 ## 1. Jobs: sourcing and cleaning
 
@@ -130,7 +130,7 @@ Code: `mechanism/base.py` (`job_value`, `candidates`, `offers`). Details:
 
 ## 5. The market loop
 
-Code: `market.py` (`run`, `_check_decisions`, `_blocked_by`).
+Code: `market.py` (`run`, `_check_decisions`, `_blocked_by`). Details: `05_loop.md`.
 
 1. **Intake.** A job that could never run on this federation at its price waits outside
    the auction, with its reason: no platform has its `hardware`, it is `oversize` for

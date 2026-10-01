@@ -160,12 +160,8 @@ def run(
     if isinstance(prefix, bool) or not isinstance(prefix, int) or prefix <= 0:
         raise ValueError("prefix must be a positive integer")
 
-    ordered = [
-        job
-        for _, job in sorted(
-            enumerate(jobs), key=lambda item: (item[1].submit_s, item[0])
-        )
-    ]
+    # The sort is stable, so jobs submitted together keep their input order.
+    ordered = sorted(jobs, key=lambda job: job.submit_s)
     full = {name: platform.exposed_nodes for name, platform in platforms.items()}
     arrivals = []
     waiting = []
@@ -183,7 +179,6 @@ def run(
     queue = []
     arrival = 0
     t = 0
-    window = 0
     while arrival < len(arrivals) or queue:
         for platform in platforms.values():
             platform.advance_to(t)
@@ -220,7 +215,7 @@ def run(
                 RoutedJob(
                     job.job_id,
                     decision.platform,
-                    window,
+                    t // window_s,
                     t,
                     cost,
                     value,
@@ -234,7 +229,6 @@ def run(
         winner_ids = {decision.job_id for decision in decisions}
         queue = [job for job in queue if job.job_id not in winner_ids]
         t += window_s
-        window += 1
 
     drain = max((row.end_s for row in routed), default=t)
     drain = max(drain, t)
