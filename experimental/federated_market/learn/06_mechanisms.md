@@ -104,7 +104,7 @@ $$
 its cost plus a share of its surplus or, when it bid under the price, its whole bid.
 `learned.charge` holds this rule for deployment, training and regret alike.
 
-**Training** (`train_regretformer`, or `python -m dr_evt_market train`). `harvest` runs
+**Training** (`train_regretformer`, or `python -m federated_market train`). `harvest` runs
 the market on many job streams under several mechanisms and keeps every window's batch
 and free nodes (step 7). Each step draws 8 of those windows and computes a relaxed
 outcome, in which the probabilities stand for the allocation. The loss is

@@ -126,7 +126,7 @@ an untrained network is fixed by its seed, and a trained one by its checkpoint.
 
 ## 7.7 The command line
 
-`python -m dr_evt_market` has four commands. Each prints `key=value` lines, and an
+`python -m federated_market` has four commands. Each prints `key=value` lines, and an
 error ends it with status 2 and an `error:` line.
 
 **`prepare`** turns traces into a jobs file (step 1) and prints the preparation summary:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the dr_evt_market test suite.
+# Run the federated_market test suite.
 
 set -euo pipefail
 
@@ -56,7 +56,7 @@ report_missing_binding() {
 if [[ -n "${PYTHON_EXECUTABLE:-}" ]]; then
     PYTHON_BIN="$PYTHON_EXECUTABLE"
     if ! supports_market_package "$PYTHON_BIN"; then
-        echo "Error: dr_evt_market requires Python 3.10+: $PYTHON_BIN" >&2
+        echo "Error: federated_market requires Python 3.10+: $PYTHON_BIN" >&2
         exit 1
     fi
     if ! find_dr_evt_module "$PYTHON_BIN"; then
@@ -77,7 +77,7 @@ else
     done < <(python_interpreter_candidates)
     if [[ -z "$PYTHON_BIN" ]]; then
         if [[ "$FOUND_COMPATIBLE_PYTHON" -eq 0 ]]; then
-            echo "Error: dr_evt_market requires Python 3.10+; set PYTHON_EXECUTABLE" >&2
+            echo "Error: federated_market requires Python 3.10+; set PYTHON_EXECUTABLE" >&2
         else
             echo "Error: no Python 3.10+ interpreter has a matching dr_evt binding." >&2
             echo "Searched the configured PYTHONPATH and:" >&2
@@ -89,7 +89,7 @@ else
     fi
 fi
 
-MARKET_PATH="$REPO_ROOT/python"
+MARKET_PATH="$REPO_ROOT/experimental"
 if [[ -n "$MODULE_DIR" ]]; then
     MARKET_PATH="$MODULE_DIR:$MARKET_PATH"
 fi
@@ -97,4 +97,4 @@ export PYTHONPATH="$MARKET_PATH${PYTHONPATH:+:$PYTHONPATH}"
 
 cd "$REPO_ROOT"
 echo "Using $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
-"$PYTHON_BIN" -m unittest discover -s python/dr_evt_market/tests -v
+"$PYTHON_BIN" -m unittest discover -s experimental/federated_market/tests -v

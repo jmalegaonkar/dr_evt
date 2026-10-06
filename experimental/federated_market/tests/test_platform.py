@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from dr_evt_market import (
+from federated_market import (
     Corona,
     Dane,
     DEFAULT_FEDERATION,
@@ -218,7 +218,7 @@ class PlatformTests(unittest.TestCase):
                 sys.executable,
                 "-c",
                 "import sys; sys.modules['dr_evt'] = None\n"
-                "from dr_evt_market import Job, federation\n"
+                "from federated_market import Job, federation\n"
                 "platforms = federation('unused', share=0.1)\n"
                 "job = Job('a', 0, 2, 3600, 1.0)\n"
                 "print(platforms['tuolumne'].exposed_nodes,"
@@ -229,7 +229,7 @@ class PlatformTests(unittest.TestCase):
             env={
                 **os.environ,
                 "PYTHONPATH": os.pathsep.join(
-                    (str(_ROOT / "install/lib/python"), str(_ROOT / "python"))
+                    (str(_ROOT / "install/lib/python"), str(_ROOT / "experimental"))
                 ),
             },
         )

@@ -15,7 +15,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dr_evt_market import federation, read_jobs, record_windows, run, train_regretformer
+from federated_market import (
+    federation,
+    read_jobs,
+    record_windows,
+    run,
+    train_regretformer,
+)
 
 _DATA = Path(__file__).with_name("data")
 _ROOT = Path(__file__).resolve().parents[3]
@@ -25,10 +31,10 @@ _TORCH = importlib.util.find_spec("torch") is not None
 def _command(*arguments):
     environment = os.environ.copy()
     environment["PYTHONPATH"] = os.pathsep.join(
-        (str(_ROOT / "install/lib/python"), str(_ROOT / "python"))
+        (str(_ROOT / "install/lib/python"), str(_ROOT / "experimental"))
     )
     return subprocess.run(
-        [sys.executable, "-m", "dr_evt_market", *arguments],
+        [sys.executable, "-m", "federated_market", *arguments],
         capture_output=True,
         text=True,
         env=environment,

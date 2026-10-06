@@ -18,8 +18,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dr_evt_market.cli import _parser
-from dr_evt_market import (
+from federated_market.cli import _parser
+from federated_market import (
     Decision,
     FirstFit,
     FirstPrice,
@@ -362,7 +362,7 @@ class MarketTests(unittest.TestCase):
         """The command line runs the fixture and prepares two trace sources."""
         environment = os.environ.copy()
         environment["PYTHONPATH"] = os.pathsep.join(
-            (str(_ROOT / "install/lib/python"), str(_ROOT / "python"))
+            (str(_ROOT / "install/lib/python"), str(_ROOT / "experimental"))
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -370,7 +370,7 @@ class MarketTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "dr_evt_market",
+                    "federated_market",
                     "run",
                     "--jobs",
                     str(_DATA / "jobs.csv"),
@@ -402,7 +402,7 @@ class MarketTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "dr_evt_market",
+                    "federated_market",
                     "run",
                     "--jobs",
                     str(_DATA / "jobs.csv"),
@@ -425,7 +425,7 @@ class MarketTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "dr_evt_market",
+                    "federated_market",
                     "prepare",
                     "--trace",
                     f"corona={_DATA / 'trace.csv'}",

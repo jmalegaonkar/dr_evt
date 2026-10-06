@@ -7,7 +7,7 @@ The overview of all steps is `master_overview.md`.
 
 Code: `jobs/traces.py` (`read_lc`, `read_simple`), `jobs/prepare.py` (`prepare`,
 `_drop_reason`) and `jobs/job.py` (`Job`, `read_jobs`, `write_jobs`). The command is
-`python -m dr_evt_market prepare`.
+`python -m federated_market prepare`.
 
 ## 1.1 What goes in
 
@@ -127,10 +127,10 @@ The summary reads 12 rows and keeps 5, all from `tioga`: `no_nodes` 1, `no_limit
 time is floored before the check, and boundary is outside because the end is excluded.
 The kept jobs are 1 sticker, 3 tier and 1 value job.
 
-From the repository's `python/` directory,
+From the repository's `experimental/` directory,
 
 ```bash
-python -m dr_evt_market prepare --trace tioga=dr_evt_market/tests/data/trace.csv \
+python -m federated_market prepare --trace tioga=federated_market/tests/data/trace.csv \
   --out jobs.csv --start 1000 --hours 0.05 --seed 0
 ```
 

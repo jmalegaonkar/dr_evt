@@ -14,7 +14,7 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
-from dr_evt_market import (
+from federated_market import (
     DEFAULT_FEDERATION,
     PLATFORMS,
     PROFILES,
@@ -23,7 +23,7 @@ from dr_evt_market import (
     read_jobs,
     write_jobs,
 )
-from dr_evt_market.cli import main
+from federated_market.cli import main
 
 _DATA = Path(__file__).with_name("data")
 

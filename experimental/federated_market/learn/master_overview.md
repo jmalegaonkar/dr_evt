@@ -1,6 +1,6 @@
-# dr_evt_market: master overview
+# federated_market: master overview
 
-`dr_evt_market` replays real job traces through a federation of five LLNL machines.
+`federated_market` replays real job traces through a federation of five LLNL machines.
 dr_evt simulates each machine's exposed share, and a central market decides, every
 window, where each waiting job runs and what it pays.
 
@@ -190,6 +190,6 @@ Code: `market.py` (`write_outputs`) and `cli.py`. Details: `07_outputs.md`.
   and makespan from dr_evt, welfare (the total of value minus cost), revenue (the total
   of charges), the counts, and the SHA-256 digest of `routed.csv`.
 
-The commands are `python -m dr_evt_market prepare` (traces to a jobs file), `run` (a
+The commands are `python -m federated_market prepare` (traces to a jobs file), `run` (a
 jobs file through one mechanism), `harvest` (the windows of runs under several
 mechanisms, to a file) and `train` (RegretFormer on harvested windows).

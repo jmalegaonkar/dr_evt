@@ -16,8 +16,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dr_evt_market import RegretFormer, federation, offers, read_jobs, run
-from dr_evt_market.mechanism.base import TOLERANCE
+from federated_market import RegretFormer, federation, offers, read_jobs, run
+from federated_market.mechanism.base import TOLERANCE
 
 _DATA = Path(__file__).with_name("data")
 _ROOT = Path(__file__).resolve().parents[3]
@@ -27,7 +27,7 @@ _TORCH = importlib.util.find_spec("torch") is not None
 def _command(*arguments):
     environment = os.environ.copy()
     environment["PYTHONPATH"] = os.pathsep.join(
-        (str(_ROOT / "install/lib/python"), str(_ROOT / "python"))
+        (str(_ROOT / "install/lib/python"), str(_ROOT / "experimental"))
     )
     return subprocess.run(
         [sys.executable, *arguments], capture_output=True, text=True, env=environment
@@ -41,8 +41,8 @@ class RegretFormerWithoutTorchTests(unittest.TestCase):
         """The package and its mechanism table load with torch blocked."""
         completed = _command(
             "-c",
-            "import sys; sys.modules['torch'] = None; import dr_evt_market; "
-            "print(dr_evt_market.MECHANISMS['regretformer'].name)",
+            "import sys; sys.modules['torch'] = None; import federated_market; "
+            "print(federated_market.MECHANISMS['regretformer'].name)",
         )
         self.assertEqual(completed.stdout.strip(), "regretformer", completed.stderr)
 
@@ -51,7 +51,7 @@ class RegretFormerWithoutTorchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             completed = _command(
                 "-m",
-                "dr_evt_market",
+                "federated_market",
                 "run",
                 "--jobs",
                 str(_DATA / "jobs.csv"),
@@ -135,7 +135,7 @@ class RegretFormerTests(unittest.TestCase):
             RegretFormer(seed=4).save(root / "network.pt")
             completed = _command(
                 "-m",
-                "dr_evt_market",
+                "federated_market",
                 "run",
                 "--jobs",
                 str(_DATA / "jobs.csv"),

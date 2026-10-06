@@ -14,10 +14,10 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-from dr_evt_market import PLATFORMS, prepare, read_jobs
-from dr_evt_market.cli import main
-from dr_evt_market.jobs.synthetic import synthesize
-from dr_evt_market.jobs.traces import read_simple
+from federated_market import PLATFORMS, prepare, read_jobs
+from federated_market.cli import main
+from federated_market.jobs.synthetic import synthesize
+from federated_market.jobs.traces import read_simple
 
 _HEADER = "job_id,job_submit_time,num_nodes,time_limit,actual_run_time,user\n"
 _DAY = 86400

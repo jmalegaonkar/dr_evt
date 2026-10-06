@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Entry point for python -m dr_evt_market."""
+"""Entry point for python -m federated_market."""
 
 from .cli import main
 

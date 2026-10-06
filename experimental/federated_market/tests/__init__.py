@@ -5,4 +5,4 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Tests for dr_evt_market."""
+"""Tests for federated_market."""

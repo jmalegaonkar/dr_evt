@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dr_evt_market import (
+from federated_market import (
     FirstFit,
     FirstPrice,
     Job,

@@ -14,7 +14,7 @@ import unittest
 from dataclasses import dataclass, field, replace
 from unittest import mock
 
-from dr_evt_market import (
+from federated_market import (
     Decision,
     FirstFit,
     FirstPrice,
@@ -414,7 +414,9 @@ class AuctionTests(unittest.TestCase):
             "dear": _Platform("dear", 4, 2.0, frozenset({"gpu"})),
         }
         job = Job("missed", 0, 2, 360, 3.0, {"gpu"})
-        with mock.patch("dr_evt_market.mechanism.vcg._solve", return_value=({}, 0.0)):
+        with mock.patch(
+            "federated_market.mechanism.vcg._solve", return_value=({}, 0.0)
+        ):
             decisions = Vcg().decide([job], platforms, {"cheap": 4, "dear": 4})
         self.assertEqual(
             decisions, [Decision("missed", "cheap", platforms["cheap"].cost(job))]

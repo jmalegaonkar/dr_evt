@@ -40,7 +40,7 @@ def _share(value):
 
 
 def _parser():
-    parser = argparse.ArgumentParser(prog="dr_evt_market")
+    parser = argparse.ArgumentParser(prog="federated_market")
     commands = parser.add_subparsers(dest="command", required=True)
 
     run_parser = commands.add_parser("run", help="run a market")

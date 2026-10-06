@@ -1,4 +1,4 @@
-# dr_evt_market
+# federated_market
 
 A market that routes HPC jobs across a federation of LLNL machines, built on dr_evt.
 Each machine shows the federation a share of its nodes, simulated by its own dr_evt
@@ -14,10 +14,10 @@ The market needs Python 3.10 or newer and dr_evt's Python bindings, built into
 needs torch; the package itself imports without any of them. From the repository root:
 
 ```bash
-export PYTHONPATH=install/lib/python:python
-python -m dr_evt_market prepare --trace corona=corona.csv --trace tioga=tioga.csv \
+export PYTHONPATH=install/lib/python:experimental
+python -m federated_market prepare --trace corona=corona.csv --trace tioga=tioga.csv \
   --out jobs.csv --hours 24
-python -m dr_evt_market run --jobs jobs.csv --out results --share 0.1
+python -m federated_market run --jobs jobs.csv --out results --share 0.1
 ```
 
 `prepare` turns traces into a jobs file with a bid on each platform; with `--synthetic`
@@ -29,10 +29,10 @@ To train RegretFormer, harvest windows from market runs, then train on them wher
 torch runs; training needs neither dr_evt nor the traces:
 
 ```bash
-python -m dr_evt_market harvest --jobs jobs.csv --out windows.jsonl.gz --share 0.1 \
+python -m federated_market harvest --jobs jobs.csv --out windows.jsonl.gz --share 0.1 \
   --mechanism vcg --mechanism firstprice --mechanism firstfit
-python -m dr_evt_market train --windows windows.jsonl.gz --out network.pt --device cuda
-python -m dr_evt_market run --jobs jobs.csv --out results --share 0.1 \
+python -m federated_market train --windows windows.jsonl.gz --out network.pt --device cuda
+python -m federated_market run --jobs jobs.csv --out results --share 0.1 \
   --mechanism regretformer --checkpoint network.pt
 ```
 

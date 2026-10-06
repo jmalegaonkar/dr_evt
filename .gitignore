@@ -73,13 +73,13 @@ docs/doxygen/
 venv_docs/
 
 # Market notebook scratch space
-python/dr_evt_market/learn/output/
-python/dr_evt_market/learn/lc_demo*
-python/dr_evt_market/.venv/
+experimental/federated_market/learn/output/
+experimental/federated_market/learn/lc_demo*
+experimental/federated_market/.venv/
 *.egg-info/
 
 # Local job traces, never committed
-python/dr_evt_market/lc_traces/
+experimental/federated_market/lc_traces/
 
 # Local multi-cluster experiment inputs and generated results
 /multi-cluster/
