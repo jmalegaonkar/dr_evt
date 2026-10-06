@@ -15,9 +15,12 @@
 #include "trace/trace.hpp"
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace dr_evt {
+
+template <typename TraceType> class BasicSimulation;
 
 /** \addtogroup dr_evt_sim
  *  @{ */
@@ -42,6 +45,8 @@ using running_jobs_t = std::map<job_no_t, Running_Job>;
  * with the currently available nodes.
  */
 class SchedulerBase {
+  template <typename TraceType> friend class BasicSimulation;
+
 protected:
   /// Total nodes available to jobs selected by this scheduler.
   num_nodes_t m_total_nodes;
@@ -152,12 +157,39 @@ public:
   virtual bool has_eligible_jobs() = 0;
 
   /**
+   * @brief Return identifiers of jobs still owned by the wait queue.
+   * @details This is an on-demand checkpoint view, not persistent duplicate
+   * state. Scheduled/removed entries are excluded and future arrivals remain
+   * included.
+   * @return Pending job identifiers in implementation-defined order.
+   */
+  virtual std::vector<job_no_t> pending_job_ids() const = 0;
+
+  /**
    * @brief Return the current FCFS-head reservation time.
    * @return Earliest projected time the FCFS head can start, in sim_time_t.
    */
   sim_time_t get_fcfs_reservation_time() const {
     return m_fcfs_reservation_time;
   }
+
+  /**
+   * @brief Sum requested-node time for jobs currently waiting.
+   * @details Implementations compute this on demand from their existing queue
+   * records. The default reports that prediction is unsupported, avoiding any
+   * storage or scheduling-path overhead for schedulers that do not opt in.
+   */
+  virtual std::optional<tdiff_t> waiting_resource_area() const {
+    return std::nullopt;
+  }
+
+  /**
+   * @brief Estimate waiting-queue drain time after the FCFS shadow time.
+   * @details Uses waiting_resource_area() and projected running-job releases.
+   * No prediction state is maintained between calls.
+   */
+  tdiff_t prediction_horizon(const running_jobs_t &running_jobs,
+                             sim_time_t current_time, double utilization) const;
 
 protected:
   /**

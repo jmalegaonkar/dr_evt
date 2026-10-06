@@ -104,9 +104,8 @@ protected:
    */
   double utilization_through(sim_time_t through_time) const;
 
-  /** Estimate the waiting-queue horizon for the settled Custom-FCFS state. */
-  tdiff_t prediction_horizon(const running_jobs_t &running_jobs,
-                             sim_time_t current_time, double utilization) const;
+  /** Compute queued node-time on demand from existing queue entries. */
+  std::optional<tdiff_t> waiting_resource_area() const override;
 
   /**
    * Construct the FCFS scheduling core for a subclass-owned selection policy.
@@ -200,6 +199,17 @@ public:
   }
   sim_time_t get_next_arrival_time() override;
   bool has_eligible_jobs() override { return active_job_count() > 0; }
+
+  /** @copydoc SchedulerBase::pending_job_ids */
+  std::vector<job_no_t> pending_job_ids() const override {
+    std::vector<job_no_t> result;
+    for (const auto &job : m_wait_queue) {
+      if (!job.removed) {
+        result.push_back(job.job_id);
+      }
+    }
+    return result;
+  }
 
   /**
    * @brief Identify feasible backfill jobs without changing queue state.

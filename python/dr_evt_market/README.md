@@ -9,9 +9,9 @@ them.
 
 ## Running it
 
-The market needs dr_evt's Python bindings, built into `install/lib/python`. Preparing
-traces needs NumPy, VCG needs SciPy, and RegretFormer needs torch; the package itself
-imports without any of them. From the repository root:
+The market needs Python 3.10 or newer and dr_evt's Python bindings, built into
+`install/lib/python`. Preparing traces needs NumPy, VCG needs SciPy, and RegretFormer
+needs torch; the package itself imports without any of them. From the repository root:
 
 ```bash
 export PYTHONPATH=install/lib/python:python
@@ -36,8 +36,10 @@ python -m dr_evt_market run --jobs jobs.csv --out results --share 0.1 \
   --mechanism regretformer --checkpoint network.pt
 ```
 
-`./tests/run_market_tests.sh` runs the suite from the repository root; set
-`PYTHON_EXECUTABLE` to choose the interpreter.
+`./tests/run_market_tests.sh` runs the suite from the repository root. It picks a
+`python3` or `python` that can import dr_evt, from `PYTHONPATH` or from a binding built
+for that interpreter under the install prefix (`lib/python` or `lib64/python`) or in
+`build/`; set `PYTHON_EXECUTABLE` to choose the interpreter.
 
 ## What is where
 

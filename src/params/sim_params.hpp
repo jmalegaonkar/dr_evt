@@ -141,6 +141,10 @@ public:
   /// Completed-job output/reclamation interval; zero follows job-store
   /// capacity. Capacity pressure and explicit/final flushes override it.
   size_t m_job_flush_interval;
+  /// Binary checkpoint destination; empty disables automatic checkpoints.
+  std::string m_checkpoint_file;
+  /// Completed-job interval for automatic checkpoints; zero disables it.
+  num_jobs_t m_checkpoint_interval_jobs;
   /// Fraction of available system memory that triggers append rejection; zero
   /// disables it.
   double m_memory_pressure_fraction;
@@ -174,6 +178,11 @@ public:
   /// Emit output timestamps with millisecond rather than integer-second
   /// precision.
   bool m_msec_output;
+
+  /// Redis connection URI; empty selects ordinary file output.
+  std::string m_redis_uri;
+  /// Namespace used for the Redis CSV value, job hashes, and sorted indexes.
+  std::string m_redis_key_prefix;
 
 private:
   /// Simulated-trace output filename.
