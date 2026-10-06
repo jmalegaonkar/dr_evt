@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Mechanisms: the interface, candidates and offers, and the auctions."""
+"""Mechanisms: the interface, the auctions, and RegretFormer's training and regret."""
 
 from .base import Decision, Mechanism, candidates, offers
 from .firstfit import FirstFit

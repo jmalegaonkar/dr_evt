@@ -74,7 +74,7 @@ venv_docs/
 
 # Market notebook scratch space
 python/dr_evt_market/learn/output/
-python/dr_evt_market/learn/lc_demo.ipynb
+python/dr_evt_market/learn/lc_demo*
 python/dr_evt_market/.venv/
 *.egg-info/
 

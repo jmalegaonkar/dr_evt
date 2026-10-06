@@ -14,8 +14,9 @@ the prefix (32 by default).
 1. **Order.** Jobs are sorted by submit time; jobs submitted together keep their input
    order.
 2. **Intake.** Every job is checked once against the federation with every node free
-   (`_blocked_by`). A job that could never run at its price waits outside the auction
-   for the whole run, with its reason: `hardware`, `oversize` or `unaffordable`.
+   (`_blocked_by`). A job that could never run, or that bid on no machine that could
+   run it, waits outside the auction for the whole run, with its reason: `hardware`,
+   `oversize` or `no_bid`.
 3. **Each window**, at `t = 0, 60, 120, ...`:
    1. Advance every platform to `t`, so jobs that ended release their nodes.
    2. Admit the arrivals with `submit <= t` to the end of the queue.
@@ -39,14 +40,14 @@ job wins.
 ## 5.2 The fixture's run, window by window
 
 The fixture `tests/data/jobs.csv` under VCG at share 0.1. At intake, j000014 is set
-aside as `oversize` and j000015 as `unaffordable`, both from their arrival at 180 s.
+aside as `oversize` from its arrival at 180 s.
 
 | window | arrivals | queue | free on Dane, Tuolumne | winners | still queued |
 |---|---|---|---|---|---|
 | 0, t = 0 | j000001 to j000005 | j000001 to j000005 | 154, 115 | j000001, j000005 on Tuolumne; j000002, j000003 on Dane | j000004 |
 | 1, t = 60 | j000006 to j000009 | j000004, j000006 to j000009 | 4, 15 | j000006, j000009 on Tuolumne; j000007 on Matrix; j000008 on Tioga | j000004 |
 | 2, t = 120 | j000010 to j000012 | j000004, j000010 to j000012 | 74, 15 | j000010 on Corona; j000011 on Dane; j000012 on Tuolumne | j000004 |
-| 3, t = 180 | j000013 | j000004, j000013 | 104, 115 | j000004, j000013 on Tuolumne | none |
+| 3, t = 180 | j000013, j000015 | j000004, j000013, j000015 | 104, 115 | j000004, j000013 on Tuolumne; j000015 on Corona | none |
 | 4, t = 240 | j000016 to j000018 | j000016 to j000018 | 154, 112 | all three on Tuolumne | none |
 | 5, t = 300 | j000019, j000020 | j000019, j000020 | 154, 115 | both on Tuolumne | none |
 
@@ -54,6 +55,9 @@ aside as `oversize` and j000015 as `unaffordable`, both from their arrival at 18
   the start, but at 60 s and 120 s Tuolumne has 15 nodes free, so it has no candidate
   and is left out of the batch while the jobs behind it are auctioned. j000001 ends at
   129 s, and j000004 wins Tuolumne at 180 s, after a wait of 180 s.
+- **j000015** bids 1.4 on Corona, under its price of 1.5, and nowhere else. At 180 s no
+  bid that covers the price wants Corona, so VCG's leftover fill places it there, and it
+  pays its whole bid: 0.0778 against a cost of 0.0833.
 - **The window's own delay.** j000010, j000013, j000016 and j000019 arrive halfway
   between two windows and wait 30 s for the next one. The others arrive on a window and
   wait nothing.

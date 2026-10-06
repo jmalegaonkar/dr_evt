@@ -149,8 +149,8 @@ class JobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             trace = _simple(directory, ["100,2,60,fixed-user\n"])
             options = {"platforms": PLATFORMS, "trace_format": "simple", "seed": 8}
-            single, _ = prepare({"tioga": trace}, **options)
-            multi, _ = prepare({"tioga": trace}, bids="multi", **options)
+            single, _ = prepare({"tioga": trace}, bids="single", **options)
+            multi, _ = prepare({"tioga": trace}, **options)
         self.assertEqual([single[0].persona, multi[0].persona], ["value", "value"])
         self.assertEqual(single[0].bid, 1.3533)
         self.assertEqual(
@@ -163,6 +163,7 @@ class JobTests(unittest.TestCase):
         jobs, _ = prepare(
             {"tioga": _DATA / "trace.csv"},
             platforms=PLATFORMS,
+            bids="single",
             start=1000,
             hours=0.05,
             seed=4,

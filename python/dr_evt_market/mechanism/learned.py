@@ -60,11 +60,11 @@ class Window:
         return prices * work
 
     def offers(self, prices: torch.Tensor) -> torch.Tensor:
-        """Return the cells that fit now and whose price covers the posted price."""
+        """Return the cells that fit now and that the job bids on, at any price."""
         return (
             self.fits
             & (self.nodes.unsqueeze(-1) <= self.free.unsqueeze(1))
-            & (self.value(prices) + TOLERANCE >= self.cost())
+            & (prices > 0)
         )
 
     def features(self, prices: torch.Tensor):
@@ -85,6 +85,12 @@ class Window:
             dim=-1,
         )
         return channels.float(), offer
+
+
+def charge(cost, value, fraction):
+    """Return cost plus a fraction of value over cost, or the value when it is less."""
+    floor = torch.minimum(cost, value)
+    return floor + fraction * (value - floor)
 
 
 def window(batches, platforms) -> Window:
@@ -250,7 +256,7 @@ def _round(probabilities, offer, nodes, free):
 
 @torch.no_grad()
 def deploy(net: Network, window: Window, prices: torch.Tensor):
-    """Return each job's platform (-1 to stay queued) and payment fraction.
+    """Return each job's platform (-1 to stay queued) and each cell's charge.
 
     Cells are taken greedily from the most probable, and a job goes to the first of
     its platforms that still has the nodes. Its waiting probability only lowers its
@@ -259,6 +265,7 @@ def deploy(net: Network, window: Window, prices: torch.Tensor):
     """
     channels, offer = window.features(prices)
     probabilities, fractions = net(channels, offer, window.jobs)
+    charges = charge(window.cost(), window.value(prices), fractions[..., None])
     probabilities = probabilities.numpy()
     offer = offer.numpy()
     nodes = window.nodes.numpy()
@@ -269,4 +276,4 @@ def deploy(net: Network, window: Window, prices: torch.Tensor):
             for row in range(len(probabilities))
         ]
     )
-    return assignment, fractions.double().numpy()
+    return assignment, charges.numpy()

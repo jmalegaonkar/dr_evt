@@ -11,7 +11,11 @@ from .base import Decision, Mechanism, offers
 
 
 class FirstPrice(Mechanism):
-    """Greedily allocate net-value offers and charge each winner its value."""
+    """Greedily allocate net-value offers and charge each winner its value.
+
+    Offers are taken from the highest net value, ties going to the earlier job, then
+    to the first platform by name. Once a job is placed, its other offers are skipped.
+    """
 
     name = "firstprice"
 

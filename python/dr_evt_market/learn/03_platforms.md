@@ -94,10 +94,12 @@ construction.
 
 ## 3.5 What follows
 
-- **Tuolumne takes the work first.** A single bid is worth the same on every machine,
-  so a mechanism that maximizes total surplus places a job where it costs least. Since
-  Tuolumne is the cheapest for both CPU and GPU work and has the largest slice, the
-  other machines take the overflow.
+- **Where the work goes depends on the bid form.** A single bid is worth the same on
+  every machine, so a mechanism that maximizes total surplus places a job where it costs
+  least: Tuolumne, the cheapest for both CPU and GPU work and the largest slice, takes
+  the work first, and the other machines take the overflow. A multi bid's surplus on a
+  machine grows with that machine's price, so a job keen on a dear machine can prefer it
+  (step 2).
 - **Contention is a matter of shares.** Between communities it appears only when the
   slices are small; a small share for Tuolumne alone is the most direct lever.
 

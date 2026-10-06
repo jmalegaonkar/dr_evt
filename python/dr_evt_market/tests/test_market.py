@@ -98,19 +98,22 @@ class MarketTests(unittest.TestCase):
             },
         )
 
-    def test_fixture_routes_at_windows_and_keeps_two_waiting(self) -> None:
-        """The fixture routes eighteen jobs; the two that cannot run still wait."""
+    def test_fixture_routes_at_windows_and_keeps_one_waiting(self) -> None:
+        """The fixture routes nineteen jobs; the one that cannot fit still waits."""
         with tempfile.TemporaryDirectory() as directory:
             jobs, result = self._fixture(Path(directory))
         by_id = {job.job_id: job for job in jobs}
-        self.assertEqual(len(result.routed), 18)
+        self.assertEqual(len(result.routed), 19)
         self.assertEqual(
             [(row.job_id, row.reason, row.submit_s) for row in result.waiting],
-            [
-                ("j000014", "oversize", 180),
-                ("j000015", "unaffordable", 180),
-            ],
+            [("j000014", "oversize", 180)],
         )
+        # j000015 bids under Corona's price, wins it anyway, and pays its whole bid.
+        under = [row for row in result.routed if row.value < row.cost]
+        self.assertEqual(
+            [(row.job_id, row.platform) for row in under], [("j000015", "corona")]
+        )
+        self.assertAlmostEqual(under[0].charge, under[0].value)
         self.assertEqual(
             [row.job_id for row in result.routed if row.window == 0],
             ["j000001", "j000002", "j000003", "j000005"],
@@ -142,7 +145,7 @@ class MarketTests(unittest.TestCase):
         # This changes only when the fixture or the model changes.
         self.assertEqual(
             outputs["sha256"],
-            "8f63322a780326174b55220d7d0695cf35017ec7ab658112e433495acc204f8b",
+            "44660331f90ca7cb142cde52d9f47ae8d953bccd47ac6a55646cd802619436cd",
         )
 
     def test_routed_output_is_byte_identical(self) -> None:
@@ -211,7 +214,7 @@ class MarketTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             _, result = self._fixture(Path(directory), prefix=2)
         per_window = collections.Counter(row.window for row in result.routed)
-        self.assertEqual(len(result.routed), 18)
+        self.assertEqual(len(result.routed), 19)
         self.assertTrue(all(count <= 2 for count in per_window.values()))
 
     def test_wide_head_job_does_not_block_prefix(self) -> None:
@@ -231,8 +234,8 @@ class MarketTests(unittest.TestCase):
             {"running": 0, "wide": 120, "narrow": 60},
         )
 
-    def test_a_job_that_can_be_placed_takes_part_and_may_lose(self) -> None:
-        """The batch is public: a job that fits now takes its place even if it loses."""
+    def test_a_bid_under_the_price_takes_part_and_wins_free_nodes(self) -> None:
+        """The batch is public, and a bid under the price wins nodes nobody else wants."""
         jobs = [
             Job("big", 0, 115, 168, {"tuolumne": 1.0}),
             Job("poor", 0, 1, 60, {"corona": 0.5, "tuolumne": 1.0}),
@@ -243,12 +246,15 @@ class MarketTests(unittest.TestCase):
                 Path(directory), share=0.1, names=("corona", "tuolumne")
             )
             result = run(jobs, platforms, Vcg(), window_s=60, prefix=1)
-        # At 60 s only Corona has room: poor fits there but bids under its price,
-        # so it takes the one place in the batch, loses, and rich waits behind it.
+        # At 60 s only Corona has room: poor takes the one place in the batch, though
+        # rich behind it bids more, and wins Corona under its price, paying its bid.
         self.assertEqual(
-            {row.job_id: row.begin_s for row in result.routed},
-            {"big": 0, "poor": 120, "rich": 180},
+            {row.job_id: (row.begin_s, row.platform) for row in result.routed},
+            {"big": (0, "tuolumne"), "poor": (60, "corona"), "rich": (120, "corona")},
         )
+        poor = next(row for row in result.routed if row.job_id == "poor")
+        self.assertLess(poor.charge, poor.cost)
+        self.assertAlmostEqual(poor.charge, poor.value)
 
     def test_a_platform_with_no_nodes_takes_no_jobs(self) -> None:
         """A share of zero exposes no nodes, and the market routes around it."""
@@ -304,7 +310,7 @@ class MarketTests(unittest.TestCase):
             result = run(jobs, platforms, FirstPrice())
             paths = write_outputs(result, root / "out")
             summary = json.loads(Path(paths["summary"]).read_text(encoding="utf-8"))
-        self.assertEqual(len(result.routed), 18)
+        self.assertEqual(len(result.routed), 19)
         self.assertEqual(result.configuration["mechanism"], "firstprice")
         self.assertAlmostEqual(
             summary["revenue"], sum(row.value for row in result.routed)
@@ -359,11 +365,11 @@ class MarketTests(unittest.TestCase):
                 env=environment,
             )
             self.assertIn("windows=6", completed.stdout.splitlines())
-            self.assertIn("routed=18", completed.stdout.splitlines())
-            self.assertIn("waiting=2", completed.stdout.splitlines())
+            self.assertIn("routed=19", completed.stdout.splitlines())
+            self.assertIn("waiting=1", completed.stdout.splitlines())
             self.assertIn(
                 "routed_sha256="
-                "8f63322a780326174b55220d7d0695cf35017ec7ab658112e433495acc204f8b",
+                "44660331f90ca7cb142cde52d9f47ae8d953bccd47ac6a55646cd802619436cd",
                 completed.stdout.splitlines(),
             )
             first_price = subprocess.run(
@@ -386,7 +392,7 @@ class MarketTests(unittest.TestCase):
                 text=True,
                 env=environment,
             )
-            self.assertIn("routed=18", first_price.stdout.splitlines())
+            self.assertIn("routed=19", first_price.stdout.splitlines())
 
             prepared_path = root / "prepared.csv"
             prepared = subprocess.run(
@@ -407,8 +413,6 @@ class MarketTests(unittest.TestCase):
                     "0.05",
                     "--platforms",
                     "corona,matrix",
-                    "--bids",
-                    "multi",
                     "--gpu-fraction",
                     "0",
                 ],
@@ -422,6 +426,7 @@ class MarketTests(unittest.TestCase):
             self.assertEqual(len(jobs), 10)
             self.assertEqual({job.source for job in jobs}, {"corona", "tioga"})
             self.assertTrue(all(not job.requires for job in jobs))
+            # Multi bids are the default: one bid on each listed platform.
             self.assertTrue(all(list(job.bid) == ["corona", "matrix"] for job in jobs))
 
 

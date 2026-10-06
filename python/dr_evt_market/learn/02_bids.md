@@ -1,10 +1,10 @@
 # Step 2: bids, from a user to a price
 
 The traces carry no bids, so preparation synthesizes each job's willingness to pay from
-a persona rule, in one of two forms: a single bid valid on every platform, or a bid on
-each platform. This page covers what a bid means, how each form is set, where the
-random draws come from, and how the market reads a bid. Step 1 (`01_jobs.md`) builds the
-jobs these bids belong to; the overview of all steps is `master_overview.md`.
+a persona rule, in one of two forms: a bid on each platform, the default, or a single
+bid valid on every platform. This page covers what a bid means, how each form is set,
+where the random draws come from, and how the market reads a bid. Step 1 (`01_jobs.md`)
+builds the jobs these bids belong to; the overview of all steps is `master_overview.md`.
 
 Code: `jobs/bids.py` (`generator`, `terms`, `single_bid`, `multi_bid`), the job loop of
 `jobs/prepare.py`, `jobs/job.py` (`Job.price`), and `mechanism/base.py` (`job_value`,
@@ -23,21 +23,24 @@ A single bid prices the work, so the job is worth the same on every platform. A 
 bid prices each platform's node-hours separately. The cost of a job on p is
 `posted price(p) x nodes x limit / speed(p) / 3600`: the posted price times the
 node-hours the job uses there. What a winner pays is set by the mechanism, and the
-market checks that it lies between the job's cost and its value.
+market checks that it is at most the job's value, and at least its cost unless the job
+bid under the price, when it pays its whole bid.
 
-`prepare` writes single bids unless told `bids="multi"` (`--bids multi`).
+`prepare` writes multi bids unless told `bids="single"` (`--bids single`).
 
 ## 2.2 Candidates and offers
 
 - A platform is a **candidate** for a job when the job can be placed there now: the
   platform has the job's hardware and enough free nodes. Bids play no part.
-- A candidate is an **offer** when the job bid on it and its value there covers its
-  cost: `bid >= posted price(p) / speed(p)` for a single bid, and
-  `bid(p) >= posted price(p)` for a multi bid.
+- A candidate is an **offer** when the job bid on it, at any price. The bid **covers**
+  the price when its value there covers its cost: `bid >= posted price(p) / speed(p)`
+  for a single bid, and `bid(p) >= posted price(p)` for a multi bid.
 
 Every window auctions the first 32 queued jobs that have a candidate, so who takes part
-depends only on public facts. A job can win only among its offers: a job whose bid is
-under the price wherever it fits takes part, loses, and stays queued.
+depends only on public facts. A job can win only among its offers. A bid that covers
+the price pays between the cost and the value; a bid under the price can win too, and
+then pays in full. VCG and pay what you bid serve the bids that cover the price first,
+so a bid under it wins only the nodes those leave.
 
 ## 2.3 Personas
 
@@ -120,10 +123,10 @@ a key:
   `(multiple x preference - 1) x cost(p)`: for the same attitude, larger on the platform
   that costs more. A mechanism that maximizes total surplus sends a job to the platform
   where it is most eager relative to the price, scaled by that price.
-- **Jobs that can win nowhere.** A job whose bid is under the price on every platform
-  where it fits cannot win at fixed prices. The market lists it as waiting from its
-  arrival, with reason `unaffordable` (step 5). A multi bidder can be in that position
-  on its own draws.
+- **Bids under the price.** A job whose bid is under the price on every platform where
+  it fits still takes part. Under VCG and pay what you bid it wins only the nodes that
+  bids covering the price leave, and pays its whole bid. A multi bidder can be in that
+  position on its own draws.
 
 ## 2.8 The fixture, draw by draw
 
@@ -147,7 +150,7 @@ j000005, and 0.832 for the CPU job j000004. The value job j000003 bids
 
 **Multi bids**, each with the persona it used on that platform (own: the user's
 persona; otherwise the platform's draw) and its multiple of the posted price. A bid of
-at least 1x the price is an offer whenever the job fits:
+at least 1x the price covers it:
 
 | job | Corona 1.5 | Dane 0.18 | Matrix 1.6 | Tioga 2.7 | Tuolumne 0.19 |
 |---|---|---|---|---|---|
@@ -157,8 +160,8 @@ at least 1x the price is an offer whenever the job fits:
 | j000004 | own tier, 0.76x | value, 5.50x | own tier, 0.75x | own tier, 1.75x | own tier, 1.50x |
 | j000005 | own tier, 0.76x | | own tier, 0.95x | sticker, 1.13x | tier, 1.04x |
 
-- j000001 can win only on Corona: the other three platforms drew a sticker and a
-  preference under 1.
+- j000001 covers the price only on Corona: the other three platforms drew a sticker and
+  a preference under 1.
 - j000004 bids 5.5 times Dane's price, where its platform drew a value persona, and
   under the price on Corona and Matrix.
 - j000003 covers every price, and its two forms place it differently. Its 3 GPU nodes
@@ -183,6 +186,8 @@ These choices are open to revision:
   unit of work over the platforms that can run the job.
 - **A multi bid is an attitude per platform.** Each platform takes the user's persona
   half the time and draws its own otherwise, shaded by a preference.
+- **A bid under the price can win.** It pays in full, and the auctions serve it after
+  the bids that cover the price.
 - **Personas, platform attitudes and preferences persist per user.** A user is keyed by
   the source and the pseudonym, so the same pseudonym in two traces is two users.
 - **The parameters are fixed.** The persona shares and multiples, the 20 percent

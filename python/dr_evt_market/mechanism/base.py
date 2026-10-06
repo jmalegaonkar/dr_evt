@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 # Two amounts of money closer than this are equal: a bid exactly at the posted price
-# covers it, and a charge may sit on either of its bounds.
+# is not under it, and a charge may sit on either of its bounds.
 TOLERANCE = 1.0e-9
 
 
@@ -34,7 +34,7 @@ class Mechanism(ABC):
         """Return the winning decisions in batch order."""
 
     def offers(self, job, platforms, free_nodes):
-        """Return the platforms this mechanism may give a job, with charge bounds."""
+        """Return the platforms this mechanism may give a job, as cost and top charge."""
         return offers(job, platforms, free_nodes)
 
 
@@ -55,13 +55,13 @@ def candidates(job, platforms, free_nodes) -> list[str]:
 
 
 def offers(job, platforms, free_nodes) -> dict[str, tuple[float, float]]:
-    """Return the candidates a job's bid can win, as cost and value pairs."""
-    result = {}
-    for name in candidates(job, platforms, free_nodes):
-        if job.price(name) is None:
-            continue
-        cost = platforms[name].cost(job)
-        value = job_value(job, platforms[name])
-        if value + TOLERANCE >= cost:
-            result[name] = (cost, value)
-    return result
+    """Return the candidates a job bid on, at any price, as cost and value pairs.
+
+    A bid under the posted price can win too, and then pays in full. A bid of zero or
+    less is no bid.
+    """
+    return {
+        name: (platforms[name].cost(job), job_value(job, platforms[name]))
+        for name in candidates(job, platforms, free_nodes)
+        if (job.price(name) or 0.0) > 0
+    }

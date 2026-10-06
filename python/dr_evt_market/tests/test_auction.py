@@ -105,8 +105,16 @@ def _brute(jobs, platforms, free_nodes, excluded=None):
         for name in choices:
             indexes[job_index, name] = index
             index += 1
+    # The solve takes only bids at or above the price; the others wait for leftovers.
     options = [
-        ((None,) if i == excluded else (None, *offer))
+        (
+            (None,)
+            if i == excluded
+            else (
+                None,
+                *(name for name, (cost, value) in offer.items() if value >= cost),
+            )
+        )
         for i, offer in enumerate(offered)
     ]
     best_score, best_choice, best_welfare = float("-inf"), None, 0.0
@@ -133,6 +141,29 @@ def _brute(jobs, platforms, free_nodes, excluded=None):
             best_score, best_choice, best_welfare = score, choice, welfare
     chosen = {i: name for i, name in enumerate(best_choice) if name is not None}
     return chosen, best_welfare, offered
+
+
+def _leftovers(jobs, platforms, free_nodes, chosen):
+    """Fill the nodes the solve leaves, in batch order, at each job's best offer."""
+    left = dict(free_nodes)
+    for i, name in chosen.items():
+        left[name] -= jobs[i].num_nodes
+    filled = {}
+    for i, job in enumerate(jobs):
+        found = offers(job, platforms, left)
+        if i in chosen or not found:
+            continue
+        name = max(found, key=lambda name: found[name][1] - found[name][0])
+        left[name] -= job.num_nodes
+        filled[i] = name
+    return filled
+
+
+def _under_the_price(job, platforms) -> bool:
+    return any(
+        job.price(name) is not None and job.price(name) < platform.price_per_node_hour
+        for name, platform in platforms.items()
+    )
 
 
 def _value(job, platform, platforms):
@@ -173,7 +204,7 @@ class AuctionTests(unittest.TestCase):
         )
 
     def test_offers_support_both_bid_forms(self) -> None:
-        """Candidates are where a job fits now; offers are those its bid covers."""
+        """Candidates are where a job fits now; offers are those it bid on."""
         with tempfile.TemporaryDirectory() as directory:
             platforms = federation(directory, share=0.1)
             free = {
@@ -186,7 +217,11 @@ class AuctionTests(unittest.TestCase):
                 candidates(scalar, platforms, free), ["corona", "tuolumne"]
             )
             self.assertEqual(candidates(low, platforms, free), ["corona", "tuolumne"])
-            self.assertEqual(list(offers(low, platforms, free)), ["tuolumne"])
+            # A bid under Corona's price is an offer too; a bid of zero is none.
+            under = offers(low, platforms, free)
+            self.assertEqual(list(under), ["corona", "tuolumne"])
+            self.assertLess(under["corona"][1], under["corona"][0])
+            self.assertEqual(offers(replace(low, bid=0.0), platforms, free), {})
             found = offers(scalar, platforms, free)
             self.assertEqual(list(found), ["corona", "tuolumne"])
             self.assertEqual(found["corona"], (0.6, 1.2))
@@ -234,36 +269,42 @@ class AuctionTests(unittest.TestCase):
         self.assertEqual(found["slow"][0], 2.0 * found["fast"][0])
 
     def test_vcg_matches_brute_force(self) -> None:
-        """The optimizer and pivot charges match exhaustive search."""
+        """The optimizer, pivot charges and leftover fill match exhaustive search."""
         mechanism = Vcg()
+        filled_under_the_price = 0
         for case, (jobs, platforms, free) in enumerate(_instances()):
             with self.subTest(case=case):
                 actual = mechanism.decide(jobs, platforms, free)
                 chosen, welfare, offered = _brute(jobs, platforms, free)
-                expected_pairs = [(jobs[i].job_id, name) for i, name in chosen.items()]
+                filled = _leftovers(jobs, platforms, free, chosen)
+                expected = []
+                for i, job in enumerate(jobs):
+                    if i in chosen:
+                        name = chosen[i]
+                        cost, value = offered[i][name]
+                        _, without, _ = _brute(jobs, platforms, free, excluded=i)
+                        pivot = max(without - (welfare - (value - cost)), 0.0)
+                        expected.append((job.job_id, name, min(value, cost + pivot)))
+                    elif i in filled:
+                        cost, value = offered[i][filled[i]]
+                        filled_under_the_price += value < cost
+                        expected.append((job.job_id, filled[i], min(cost, value)))
                 self.assertEqual(
-                    [(item.job_id, item.platform) for item in actual], expected_pairs
+                    [(item.job_id, item.platform) for item in actual],
+                    [(job_id, name) for job_id, name, _ in expected],
                 )
-                actual_welfare = sum(
-                    offered[i][decision.platform][1] - offered[i][decision.platform][0]
-                    for decision in actual
-                    for i, job in enumerate(jobs)
-                    if job.job_id == decision.job_id
-                )
-                self.assertAlmostEqual(actual_welfare, welfare)
-                for decision in actual:
-                    job_index = next(
-                        i for i, job in enumerate(jobs) if job.job_id == decision.job_id
-                    )
-                    cost, value = offered[job_index][decision.platform]
-                    _, without, _ = _brute(jobs, platforms, free, excluded=job_index)
-                    pivot = max(without - (welfare - (value - cost)), 0.0)
-                    self.assertAlmostEqual(decision.charge, min(value, cost + pivot))
+                for decision, (_, _, charge) in zip(actual, expected):
+                    self.assertAlmostEqual(decision.charge, charge)
+        self.assertGreater(filled_under_the_price, 0)
 
     def test_truthful_bid_resists_scaled_misreports(self) -> None:
-        """Scaling either bid form cannot improve a job's true utility."""
+        """Among bids at or above the price, scaling cannot improve true utility."""
         mechanism = Vcg()
-        for case, (jobs, platforms, free) in enumerate(_instances(10)):
+        for case, (jobs, dear, free) in enumerate(_instances(10)):
+            platforms = {
+                name: replace(item, price_per_node_hour=item.price_per_node_hour / 4)
+                for name, item in dear.items()
+            }
             truthful = {
                 item.job_id: item for item in mechanism.decide(jobs, platforms, free)
             }
@@ -282,6 +323,10 @@ class AuctionTests(unittest.TestCase):
                     )
                     reports = list(jobs)
                     reports[index] = replace(job, bid=bid)
+                    if _under_the_price(job, platforms) or _under_the_price(
+                        reports[index], platforms
+                    ):
+                        continue
                     outcome = {
                         item.job_id: item
                         for item in mechanism.decide(reports, platforms, free)
@@ -293,6 +338,46 @@ class AuctionTests(unittest.TestCase):
                     )
                     with self.subTest(case=case, job=job.job_id, scale=scale):
                         self.assertLessEqual(utility, truth + 1.0e-9)
+
+    def test_bidding_under_the_price_pays_on_idle_nodes(self) -> None:
+        """A bid under the price wins idle nodes and pays itself, below the cost."""
+        platform = _Platform("only", 10, 2.0, frozenset({"gpu"}))
+        platforms = {platform.name: platform}
+        job = Job("solo", 0, 2, 360, 3.0, {"gpu"})
+        truthful = Vcg().decide([job], platforms, {"only": 10})
+        shaded = Vcg().decide([replace(job, bid=1.0)], platforms, {"only": 10})
+        self.assertAlmostEqual(truthful[0].charge, platform.cost(job))
+        self.assertEqual(shaded[0].platform, "only")
+        self.assertAlmostEqual(shaded[0].charge, 1.0 * 2 * 360 / 3600)
+        self.assertLess(shaded[0].charge, truthful[0].charge)
+
+    def test_three_jobs_on_two_machines(self) -> None:
+        """The guide's example: a tie, a joint choice and bids under the price."""
+        platforms = {
+            "A": _Platform("A", 4, 1.0, frozenset({"cpu"})),
+            "B": _Platform("B", 6, 2.0, frozenset({"cpu"})),
+        }
+        jobs = [
+            Job("J1", 0, 4, 3600, {"A": 3.0, "B": 4.0}),
+            Job("J2", 0, 4, 3600, {"A": 2.75, "B": 1.5}),
+            Job("J3", 0, 2, 3600, {"A": 1.5, "B": 1.5}),
+        ]
+        # VCG sends J1 to B so J2 can have A; pay what you bid breaks J1's tie by
+        # name; FirstFit takes the cheapest machine and charges its cost.
+        expected = [
+            (Vcg(), [("J1", "B", 8.0), ("J2", "A", 5.0), ("J3", "B", 3.0)]),
+            (FirstPrice(), [("J1", "A", 12.0), ("J2", "B", 6.0), ("J3", "B", 3.0)]),
+            (FirstFit(), [("J1", "A", 4.0), ("J2", "B", 8.0), ("J3", "B", 4.0)]),
+        ]
+        for mechanism, outcome in expected:
+            with self.subTest(mechanism=mechanism.name):
+                decisions = mechanism.decide(jobs, platforms, {"A": 4, "B": 6})
+                self.assertEqual(
+                    [(item.job_id, item.platform) for item in decisions],
+                    [(job_id, name) for job_id, name, _ in outcome],
+                )
+                for decision, (_, _, charge) in zip(decisions, outcome):
+                    self.assertAlmostEqual(decision.charge, charge)
 
     def test_winner_without_displacement_pays_cost(self) -> None:
         """A sole winner has no pivot premium."""
@@ -336,7 +421,7 @@ class AuctionTests(unittest.TestCase):
         )
 
     def test_first_price_is_feasible_and_bounded_by_vcg(self) -> None:
-        """Greedy winners fit, pay their values, and cannot beat VCG welfare."""
+        """Greedy winners fit and pay their values; above the price, VCG does better."""
         first_price = FirstPrice()
         for case, (jobs, platforms, free) in enumerate(_instances()):
             with self.subTest(case=case):
@@ -354,14 +439,17 @@ class AuctionTests(unittest.TestCase):
                     job = jobs[index]
                     cost, value = offered[index][decision.platform]
                     used[decision.platform] += job.num_nodes
-                    welfare += value - cost
+                    welfare += max(value - cost, 0.0)
                     self.assertAlmostEqual(decision.charge, value)
                 self.assertTrue(all(used[name] <= free[name] for name in platforms))
 
                 vcg = Vcg().decide(jobs, platforms, free)
                 vcg_welfare = sum(
-                    offered[job_indexes[item.job_id]][item.platform][1]
-                    - offered[job_indexes[item.job_id]][item.platform][0]
+                    max(
+                        offered[job_indexes[item.job_id]][item.platform][1]
+                        - offered[job_indexes[item.job_id]][item.platform][0],
+                        0.0,
+                    )
                     for item in vcg
                 )
                 self.assertLessEqual(welfare, vcg_welfare + 1.0e-9)

@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 from dr_evt_market import (
+    FirstFit,
     FirstPrice,
     Job,
     RegretFormer,
@@ -38,22 +39,29 @@ def _first_window(directory):
 class GridRegretTests(unittest.TestCase):
     """Measure the grid lower bound on mechanisms with known incentives."""
 
-    def test_vcg_has_no_grid_regret(self) -> None:
-        """No price a job can report beats the truth under VCG."""
+    def test_vcg_regret_is_the_cost_saved_under_the_price(self) -> None:
+        """Alone, a job pays its cost under VCG, or the least bid on the grid."""
+        job = Job("shade", 0, 2, 360, 3.0, {"gpu"})
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share=0.1, names=("corona",))
+            regret = grid_regret(Vcg(), [job], platforms, {"corona": 12})
+        # The grid's least positive price is 4 x 3.0 / 100 = 0.12.
+        self.assertAlmostEqual(regret["shade"], (1.5 - 0.12) * 2 * 360 / 3600)
+
+    def test_first_fit_has_no_regret(self) -> None:
+        """FirstFit reads no bid, so no report changes what a job gets or pays."""
         with tempfile.TemporaryDirectory() as directory:
             jobs, platforms, free = _first_window(directory)
-            regret = grid_regret(Vcg(), jobs, platforms, free, points=5)
-        self.assertEqual(set(regret), {job.job_id for job in jobs})
-        for value in regret.values():
-            self.assertLess(abs(value), 1.0e-6)
+            regret = grid_regret(FirstFit(), jobs, platforms, free, points=5)
+        self.assertEqual(set(regret.values()), {0.0})
 
     def test_pay_what_you_bid_regret_is_the_shaded_surplus(self) -> None:
-        """Bidding the posted price keeps the whole surplus under pay what you bid."""
+        """Alone, a job keeps its value less the least bid on the grid."""
         job = Job("shade", 0, 2, 360, 3.0, {"gpu"})
         with tempfile.TemporaryDirectory() as directory:
             platforms = federation(Path(directory), share=0.1, names=("corona",))
             regret = grid_regret(FirstPrice(), [job], platforms, {"corona": 12})
-        self.assertAlmostEqual(regret["shade"], (3.0 - 1.5) * 2 * 360 / 3600)
+        self.assertAlmostEqual(regret["shade"], (3.0 - 0.12) * 2 * 360 / 3600)
 
 
 @unittest.skipUnless(_TORCH, "RegretFormer needs torch")

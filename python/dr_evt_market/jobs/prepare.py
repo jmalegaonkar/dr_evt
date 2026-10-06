@@ -32,7 +32,7 @@ def prepare(
     traces,
     *,
     platforms,
-    bids="single",
+    bids="multi",
     trace_format="lc",
     start=None,
     hours=None,
@@ -44,8 +44,9 @@ def prepare(
     """Prepare deterministic jobs from one interval across named traces.
 
     `platforms` are the profiles bid on, each with a `name`, a posted
-    `price_per_node_hour`, its `hardware` and its `speed`. `bids` is "single" or
-    "multi". With `synthetic`, the jobs are one day drawn from the interval instead.
+    `price_per_node_hour`, its `hardware` and its `speed`. `bids` is "multi", a bid
+    on each platform, or "single", one bid for all. With `synthetic`, the jobs are one
+    day drawn from the interval instead.
     """
     readers = {"lc": read_lc, "simple": read_simple}
     if trace_format not in readers:

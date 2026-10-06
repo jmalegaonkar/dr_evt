@@ -110,7 +110,9 @@ def _check_decisions(
             raise MarketError(f"{decision.job_id}: no offer on this platform")
         cost, maximum_charge = offer
         value = job_value(job, platforms[decision.platform])
-        if not cost - TOLERANCE <= decision.charge <= maximum_charge + TOLERANCE:
+        # A winner pays at least the cost, or its whole bid when that is less.
+        least = min(cost, maximum_charge)
+        if not least - TOLERANCE <= decision.charge <= maximum_charge + TOLERANCE:
             raise MarketError(f"{decision.job_id}: charge is outside its offer")
         used[decision.platform] += job.num_nodes
         if used[decision.platform] > free_nodes[decision.platform]:
@@ -147,7 +149,7 @@ def _blocked_by(job, platforms, full_nodes, mechanism):
     if not any(platform.fits(job) for platform in platforms.values()):
         return "oversize"
     if not mechanism.offers(job, platforms, full_nodes):
-        return "unaffordable"
+        return "no_bid"
     return None
 
 
@@ -166,9 +168,8 @@ def run(
     arrivals = []
     waiting = []
     for job in ordered:
-        # Nothing is turned away. A job that no platform could run at its price,
-        # even idle, waits outside the auction: at fixed prices and shares, until
-        # the run ends.
+        # Nothing is turned away. A job that no platform could run even idle, or
+        # that bid on none that could, waits outside the auction until the run ends.
         reason = _blocked_by(job, platforms, full, mechanism)
         if reason is None:
             arrivals.append(job)
@@ -188,7 +189,7 @@ def run(
 
         free = {name: platform.free_nodes() for name, platform in platforms.items()}
         # Who takes part depends only on public facts: a job that can be placed now
-        # is auctioned even where its bid cannot cover the price, and loses there.
+        # is auctioned, whatever it bids.
         batch = []
         for job in queue:
             if candidates(job, platforms, free):

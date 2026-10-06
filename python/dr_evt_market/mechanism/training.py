@@ -75,8 +75,9 @@ def train_regretformer(
     nodes the relaxed allocation overbooks, and the free nodes it leaves idle while
     a job that fits them waits, since the market places every job that fits.
     Misreports come from the item-wise grid on the relaxed outcome, for up to
-    `regret_jobs` jobs per window, instead of gradient ascent: a report that crosses
-    a posted price changes the job's offers, which gradients cannot see. Returns
+    `regret_jobs` jobs per window, instead of gradient ascent: a report of zero
+    withdraws an offer, which gradients cannot see, and the charge rule changes at
+    the posted price. Returns
     the trained mechanism and each step's history, whose regret is the relaxed
     network's: measure the deployed mechanism with `refined_regret`.
     """
@@ -93,10 +94,11 @@ def train_regretformer(
         channels, offer = window.features(prices)
         probabilities, fractions = net(channels, offer, window.jobs)
         allocation = probabilities[..., : prices.shape[-1]]
-        premium = fractions[..., None] * (window.value(prices) - window.cost())
-        gain = window.value(truth) - window.cost() - premium
+        cost = window.cost()
+        charge = learned.charge(cost, window.value(prices), fractions[..., None])
+        gain = window.value(truth) - charge
         waiting = probabilities[..., -1:] * offer
-        return allocation, waiting, premium, (allocation * gain).sum(-1)
+        return allocation, waiting, charge - cost, (allocation * gain).sum(-1)
 
     def misreported(window, truth, rows, owners, prices):
         reports = truth[rows].clone()
@@ -174,7 +176,8 @@ def train_regretformer(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         optimizer.step()
-        surplus = (window.value(truth) - window.cost()) * window.offers(truth)
+        surplus = (window.value(truth) - window.cost()).clamp(min=0)
+        surplus = surplus * window.offers(truth)
         available = (surplus.amax(-1).sum(-1) / scale).mean().item()
         ratio = lost.item() / (available + 1.0e-8)
         change = math.log(ratio) - math.log(target) if ratio > 0 else -math.inf

@@ -9,8 +9,10 @@
 
 from dataclasses import dataclass
 
-from .base import Decision, Mechanism, offers
+from .base import TOLERANCE, Decision, Mechanism, offers
 
+# Equally good placements go to the earlier offers: each chosen offer adds this much
+# times its position in the batch to the objective.
 _TIE_BREAK = 1.0e-9
 
 
@@ -33,7 +35,8 @@ def _variables(jobs, platforms, free_nodes, excluded=None):
     index = 0
     for job_index, job in enumerate(jobs):
         for name, (cost, value) in offers(job, platforms, free_nodes).items():
-            if job_index != excluded:
+            # A bid under the price would lower the welfare: no optimum takes it.
+            if job_index != excluded and value + TOLERANCE >= cost:
                 variables.append(
                     _Variable(index, job_index, name, cost, value, job.num_nodes)
                 )
@@ -84,11 +87,11 @@ def _leftover_offer(job, platforms, free_nodes):
     if not left:
         return None
     name = max(left, key=lambda name: left[name][1] - left[name][0])
-    return name, left[name][0]
+    return name, min(left[name])
 
 
 class Vcg(Mechanism):
-    """Maximize net value and charge each winner its Clarke pivot."""
+    """Maximize net value and charge Clarke pivots, then fill the nodes left over."""
 
     name = "vcg"
 
@@ -108,9 +111,10 @@ class Vcg(Mechanism):
             variable = chosen.get(job_index)
             if variable is None:
                 # The solve leaves out a job that fits the nodes left over only
-                # when it adds no welfare (it bids the posted price) or, within
-                # the solver's tolerance, almost none. It displaces nobody, so
-                # its pivot is zero and it pays its cost.
+                # when it adds no welfare (it bids the posted price or under it)
+                # or, within the solver's tolerance, almost none. It displaces
+                # nobody, so its pivot is zero: it pays its cost, or its whole bid
+                # when that is less.
                 offer = _leftover_offer(job, platforms, left)
                 if offer is not None:
                     left[offer[0]] -= job.num_nodes

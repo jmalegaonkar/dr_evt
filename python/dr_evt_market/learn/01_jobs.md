@@ -132,17 +132,17 @@ python -m dr_evt_market prepare --trace tioga=dr_evt_market/tests/data/trace.csv
 writes
 
 ```text
-job_id,job_submit_time,num_nodes,time_limit,bid,requires,runtime,requested,source,user,persona
-j000001,0,6,40,0.5934,gpu,40,120,tioga,2,tier
-j000002,35,4,40,0.5934,gpu,40,60,tioga,1,sticker
-j000003,85,3,70,4.0325,gpu,70,80,tioga,6,value
-j000004,115,8,50,0.832,,50,90,tioga,5,tier
-j000005,174,1,15,0.5934,gpu,15,20,tioga,10,tier
+job_id,job_submit_time,num_nodes,time_limit,bid,bid:corona,bid:dane,bid:matrix,bid:tioga,bid:tuolumne,requires,runtime,requested,source,user,persona
+j000001,0,6,40,,1.9144,,1.3676,2.6244,0.1757,gpu,40,120,tioga,2,tier
+j000002,35,4,40,,0.8425,,1.7616,4.1175,0.2943,gpu,40,60,tioga,1,sticker
+j000003,85,3,70,,9.4598,,7.8678,3.4612,1.2708,gpu,70,80,tioga,6,value
+j000004,115,8,50,,1.1332,0.9895,1.1972,4.7211,0.2847,,50,90,tioga,5,tier
+j000005,174,1,15,,1.1469,,1.5255,3.06,0.1977,gpu,15,20,tioga,10,tier
 ```
 
 Each limit is the run time: j000001 asked for 120 s and ran 40 s. The bids are step 2
-(`02_bids.md`): single bids by default, and one `bid:<platform>` column per platform
-with `--bids multi`.
+(`02_bids.md`): by default one `bid:<platform>` column per platform, empty where the job
+cannot run (Dane has no GPUs), and a single `bid` column with `--bids single`.
 
 ## 1.7 Synthetic days
 

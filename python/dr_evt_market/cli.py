@@ -77,7 +77,7 @@ def _parser():
     prepare_parser.add_argument("--gpu-fraction", type=float, default=0.5)
     prepare_parser.add_argument("--requires")
     prepare_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
-    prepare_parser.add_argument("--bids", choices=("single", "multi"), default="single")
+    prepare_parser.add_argument("--bids", choices=("multi", "single"), default="multi")
     prepare_parser.add_argument("--synthetic", action="store_true")
     return parser
 

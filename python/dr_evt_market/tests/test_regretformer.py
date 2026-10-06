@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 
 from dr_evt_market import RegretFormer, federation, offers, read_jobs, run
+from dr_evt_market.mechanism.base import TOLERANCE
 
 _DATA = Path(__file__).with_name("data")
 _ROOT = Path(__file__).resolve().parents[3]
@@ -74,14 +75,13 @@ class RegretFormerTests(unittest.TestCase):
             with self.subTest(seed=seed), tempfile.TemporaryDirectory() as directory:
                 platforms = federation(Path(directory), share=0.1)
                 result = run(jobs, platforms, RegretFormer(seed=seed))
-                self.assertEqual(len(result.routed), 18)
-                self.assertEqual(
-                    {row.reason for row in result.waiting},
-                    {"oversize", "unaffordable"},
-                )
+                self.assertEqual(len(result.routed), 19)
+                self.assertEqual({row.reason for row in result.waiting}, {"oversize"})
+                # The bounds the market checks, with its tolerance.
                 for row in result.routed:
-                    self.assertLessEqual(row.cost, row.charge)
-                    self.assertLessEqual(row.charge, row.value)
+                    lowest = min(row.cost, row.value)
+                    self.assertLessEqual(lowest, row.charge + TOLERANCE)
+                    self.assertLessEqual(row.charge, row.value + TOLERANCE)
 
     def test_a_platform_with_no_nodes_leaves_the_network_finite(self) -> None:
         """A platform with no nodes scales by one and receives no job."""

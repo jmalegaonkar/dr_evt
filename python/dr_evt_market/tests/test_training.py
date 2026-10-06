@@ -122,7 +122,7 @@ class TrainingTests(unittest.TestCase):
                 network,
             )
         self.assertEqual(ran.returncode, 0, ran.stderr)
-        self.assertIn("routed=18", ran.stdout.splitlines())
+        self.assertIn("routed=19", ran.stdout.splitlines())
 
 
 if __name__ == "__main__":

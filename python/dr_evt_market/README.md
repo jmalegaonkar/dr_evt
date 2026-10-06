@@ -55,9 +55,9 @@ single_value(p) = bid              * nodes * limit            / 3600
 multi_value(p)  = bid(p)           * nodes * limit / speed(p) / 3600
 ```
 
-Trace preparation writes single bids, or multi bids with `--bids multi`. A seed, source,
-and pseudonymous user select a persistent persona; a row without a user is its own user.
-Each persona bids a multiple of a price:
+Trace preparation writes multi bids, a bid on each platform, or single bids with
+`--bids single`. A seed, source, and pseudonymous user select a persistent persona; a
+row without a user is its own user. Each persona bids a multiple of a price:
 
 | Persona | Share of users | Multiple |
 |---|---:|---|
@@ -98,24 +98,28 @@ unused.
 
 A platform is a candidate for a job when the job can be placed there now: it has the
 job's hardware and enough free nodes. `candidates` lists them whatever the job bids.
-`offers` keeps the candidates the job bid on whose reported value covers the cost: the
-placements its bid can win. `Vcg` maximizes total reported value minus platform cost
-over the offers, subject to one platform per job and node capacity. Its Clarke pivot is
-the second price generalized to several platforms with capacity. A job whose reported
-value exactly covers cost adds nothing to that total; it takes nodes the winners leave
-free, in queue order, and pays the posted cost.
+`offers` keeps the candidates the job bid on, at any price: a bid under the posted
+price can win too, and then pays in full. A bid of zero or less is no bid. `Vcg`
+maximizes total reported value minus platform cost over the offers at or above the
+price, subject to one platform per job and node capacity. Its Clarke pivot is the second
+price generalized to several platforms with capacity. A job left out of that total,
+because it bids the price or under it, takes nodes the winners leave free, in queue
+order, and pays the posted cost or its whole bid, whichever is less.
 
 VCG lets users keep the savings between their values and the charges above posted
-cost. Pay what you bid assigns offers greedily and gives that surplus to the center.
-Both mechanisms report welfare and revenue through the same market outputs.
+cost. Pay what you bid takes offers greedily by net value, ties going to the earlier job
+and then the first platform by name, and gives that surplus to the center. Both
+mechanisms report welfare and revenue through the same market outputs. Since a bid under
+the price can win, neither is truthful: a job alone on a platform pays less by bidding
+under the price.
 
 `FirstFit` is the no-market baseline over the same federation slices and market loop. It
 ignores bids and visits batch jobs in arrival order, placing each on the available
 platform with the lowest posted cost for that job, including speed, and charging that
 cost. Comparisons therefore change the allocation rule without changing capacity or the
-workload. Since it reads no bid, a job can land where it bid less than the price, or did
-not bid at all, and pay more than its value there: compare `FirstFit` on service, not on
-welfare.
+workload. Since it reads no bid, it charges the cost even where a job bid less, or did
+not bid at all, so a job can pay more than its value there: compare `FirstFit` on
+service, not on welfare.
 
 `RegretFormer` is a learned mechanism: the network of Ivanov et al. (NeurIPS 2022) over
 a grid of jobs by platforms. For each job it gives a probability for every platform it
@@ -123,16 +127,18 @@ has an offer on and for waiting, and a payment fraction. The market takes the mo
 probable cells first and places a job on the first of its platforms that still has the
 nodes. Waiting only lowers a job's place in that order: a job stays in the queue only
 when none of its platforms has room left, and is never turned away. A winner pays its
-cost plus its payment fraction of the difference between its value and that cost. It
+cost plus its payment fraction of the difference between its value and that cost, or
+its whole bid when it bid under the price. It
 needs `torch`; `RegretFormer(path)` loads a saved network and `RegretFormer(seed=0)`
 builds an untrained one.
 
 `grid_regret(mechanism, jobs, platforms, free_nodes)` measures, for one window, how
 much each job could gain by misreporting while the others report truthfully, on the
 decisions the market applies. It moves one price at a time over a grid that includes
-the posted prices, where a job's offers change, then scales the whole report: the
-item-wise grid of You et al. (2026). The result is a lower bound on the regret. VCG
-reads zero; pay what you bid reads up to each winner's surplus over the posted price.
+the posted prices, where the charge rule changes, then scales the whole report: the
+item-wise grid of You et al. (2026). The result is a lower bound on the regret. Neither
+auction reads zero: alone on a platform, a job keeps nearly all of its cost under VCG,
+and of its value under pay what you bid, by bidding the grid's least positive price.
 `refined_regret(regretformer, ...)` adds their guided gradient refinement for the
 learned mechanism, and reports beside it the gradient-only estimate that RegretFormer's
 own protocol gives.
@@ -152,31 +158,31 @@ on windows it was not trained on.
 At each fixed window, the market advances every platform, admits arrivals, auctions the
 first `prefix` queued jobs that can be placed now, submits winners, and advances again;
 a job that cannot be placed anywhere now is skipped for the window without losing its
-queue position. Who takes part therefore depends only on public facts, never on bids: a
-job whose bid cannot cover the price where it fits takes part and loses. A mechanism
-must place every batch job that has an offer on the nodes left over, so a job waits only
-when no platform it can win has room; anything else raises `MarketError`. The market's
-guarantee is that every accepted winner starts in its market window. Per-job begin and
-end are recorded by the market from that guarantee, not read from `dr_evt`, and streamed
-jobs run their speed-adjusted limit.
+queue position. Who takes part therefore depends only on public facts, never on bids. A
+mechanism must place every batch job that has an offer on the nodes left over, so a job
+waits only when no platform it bid on has room; anything else raises `MarketError`. The
+market's guarantee is that every accepted winner starts in its market window. Per-job
+begin and end are recorded by the market from that guarantee, not read from `dr_evt`,
+and streamed jobs run their speed-adjusted limit.
 
 ## Outputs
 
 `run` writes `routed.csv`, `waiting.csv`, `service.csv`, and `summary.json`. The routed
-ledger holds the chosen platform, cost, value, premium, charge, and timing. A routed
-job's community is its `source`, or the empty string when absent. `service.csv` has one
-row per community plus `all`: count, mean wait (`begin_s - submit_s`), node-hour-weighted
+ledger holds the chosen platform, cost, value, premium (the charge minus the cost,
+negative for a job that bid under the price), charge, and timing. A routed job's
+community is its `source`, or the empty string when absent. `service.csv` has one row
+per community plus `all`: count, mean wait (`begin_s - submit_s`), node-hour-weighted
 mean wait with weight `num_nodes * (end_s - begin_s) / 3600`, and mean bounded slowdown
-`max(1, (wait + run) / max(run, 10))`, where `run = end_s - begin_s`. The summary repeats
-these measures under `service`, along with the resolved configuration, each platform's
-completed jobs, utilization and makespan from dr_evt, welfare, revenue, counts, and the
-SHA-256 digest of `routed.csv`.
+`max(1, (wait + run) / max(run, 10))`, where `run = end_s - begin_s`. The summary
+repeats these measures under `service`, along with the resolved configuration, each
+platform's completed jobs, utilization and makespan from dr_evt, welfare, revenue,
+counts, and the SHA-256 digest of `routed.csv`.
 
-The market turns no job away. A job that no platform could run at its price, even with
-every node free, waits outside the auction: no platform has its `hardware`, it is
-`oversize` for every share, or it is `unaffordable` wherever it fits. At fixed prices
-and shares it waits until the run ends, and `waiting.csv` lists it with that reason
-and its submission time.
+The market turns no job away. A job that no platform could run, even with every node
+free, waits outside the auction: no platform has its `hardware`, it is `oversize` for
+every share, or it bid on no platform that fits it (`no_bid`). At fixed shares it waits
+until the run ends, and `waiting.csv` lists it with that reason and its submission
+time.
 
 ## Command line
 
@@ -210,9 +216,10 @@ python -m dr_evt_market prepare \
 ```
 
 The interval starts at the earliest submission unless `--start` gives a time in the
-traces' own clock, which is epoch seconds for LC traces. Bids are single bids over the
-five default platforms; `--bids multi` writes a bid per platform instead, and
-`--platforms` names other platforms. Use `--format simple` for the simple trace format.
+traces' own clock, which is epoch seconds for LC traces. Bids are multi bids, one on
+each of the five default platforms that has the job's hardware; `--bids single` writes
+one bid for all of them instead, and `--platforms` names other platforms. Use
+`--format simple` for the simple trace format.
 Trace sources are community labels and need not name profiles.
 
 To draw a synthetic day from an interval instead of replaying it:

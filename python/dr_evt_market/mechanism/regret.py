@@ -42,7 +42,7 @@ def _prices(job, names, platforms):
 
 def _misreports(prices, posted, points, span):
     # Pairs of (item, prices): each price moved alone, then the whole report scaled
-    # (item -1). The levels include the posted prices, where the offers change.
+    # (item -1). The levels include the posted prices, where the charge rule changes.
     top = max(prices)
     levels = [top * span * step / (points - 1) for step in range(points)]
     variants = []
@@ -139,18 +139,12 @@ def refined_regret(
         for first in range(0, len(rows), _CHUNK):
             part, offered = rows[first : first + _CHUNK], prices[first : first + _CHUNK]
             window = base.repeat(len(part))
-            reported = reports(part, offered)
-            assignment, fractions = learned.deploy(net, window, reported)
-            reported_value = window.value(reported)
+            assignment, charges = learned.deploy(net, window, reports(part, offered))
             index = np.arange(len(part))
             placed = torch.as_tensor(assignment[index, part])
             column = placed.clamp(min=0)
-            job = torch.as_tensor(part)
-            fraction = torch.as_tensor(fractions[index, part])
-            charged = cost[job, column] + fraction * (
-                reported_value[torch.arange(len(part)), job, column] - cost[job, column]
-            )
-            gain = true_value[job, column] - charged
+            charged = torch.as_tensor(charges[index, part, column.numpy()])
+            gain = true_value[torch.as_tensor(part), column] - charged
             utilities.append(torch.where(placed >= 0, gain, torch.zeros_like(gain)))
         return torch.cat(utilities)
 
@@ -160,8 +154,8 @@ def refined_regret(
         channels, offer = window.features(reported)
         probabilities, fractions = net(channels, offer, window.jobs)
         index, job = torch.arange(len(rows)), torch.as_tensor(rows)
-        charged = cost[job] + fractions[index, job, None] * (
-            window.value(reported)[index, job] - cost[job]
+        charged = learned.charge(
+            cost[job], window.value(reported)[index, job], fractions[index, job, None]
         )
         gain = true_value[job] - charged
         return (probabilities[index, job, :width] * gain).sum(-1)

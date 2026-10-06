@@ -7,7 +7,7 @@
 
 """RegretFormer as a market mechanism: a learned allocation and learned premiums."""
 
-from .base import Decision, Mechanism, offers
+from .base import Decision, Mechanism
 
 
 class RegretFormer(Mechanism):
@@ -30,19 +30,15 @@ class RegretFormer(Mechanism):
         self._learned.save(self.net, path, **notes)
 
     def decide(self, jobs, platforms, free_nodes) -> list[Decision]:
-        """Round the network's allocation under free nodes and charge premiums."""
+        """Round the network's allocation under free nodes and charge each winner."""
         jobs = list(jobs)
         if not jobs:
             return []
         window = self._learned.window([(jobs, free_nodes)], platforms)
-        assignment, fractions = self._learned.deploy(self.net, window, window.prices)
+        assignment, charges = self._learned.deploy(self.net, window, window.prices)
         names = list(platforms)
-        decisions = []
-        for index, job in enumerate(jobs):
-            if assignment[0, index] < 0:
-                continue
-            name = names[assignment[0, index]]
-            cost, value = offers(job, platforms, free_nodes)[name]
-            charge = cost + fractions[0, index] * (value - cost)
-            decisions.append(Decision(job.job_id, name, float(charge)))
-        return decisions
+        return [
+            Decision(job.job_id, names[column], float(charges[0, index, column]))
+            for index, (job, column) in enumerate(zip(jobs, assignment[0]))
+            if column >= 0
+        ]

@@ -11,7 +11,10 @@ from .base import Decision, Mechanism, candidates
 
 
 class FirstFit(Mechanism):
-    """Place jobs in arrival order on their cheapest available platform."""
+    """Place jobs in arrival order on their cheapest available platform.
+
+    Equal costs go to the platform listed first.
+    """
 
     name = "firstfit"
 
