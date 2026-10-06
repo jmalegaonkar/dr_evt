@@ -7,6 +7,9 @@
 
 """Tests for the platform class and the five machines."""
 
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,6 +26,8 @@ from dr_evt_market import (
     Tuolumne,
     federation,
 )
+
+_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _job(
@@ -205,6 +210,30 @@ class PlatformTests(unittest.TestCase):
             self.assertEqual(platform.free_nodes(), 1)
             platform.advance_to(5)
             self.assertEqual(platform.free_nodes(), 2)
+
+    def test_platform_facts_need_no_simulation(self) -> None:
+        """A federation's prices, sizes and costs load without dr_evt."""
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.modules['dr_evt'] = None\n"
+                "from dr_evt_market import Job, federation\n"
+                "platforms = federation('unused', share=0.1)\n"
+                "job = Job('a', 0, 2, 3600, 1.0)\n"
+                "print(platforms['tuolumne'].exposed_nodes,"
+                " round(platforms['dane'].cost(job), 4))",
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(
+                    (str(_ROOT / "install/lib/python"), str(_ROOT / "python"))
+                ),
+            },
+        )
+        self.assertEqual(completed.stdout.split(), ["115", "0.4181"], completed.stderr)
 
 
 if __name__ == "__main__":

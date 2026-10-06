@@ -7,7 +7,7 @@
 
 """A federation market over DR_EVT: five platforms, a job stream, an auction."""
 
-from .harvest import harvest, read_windows, write_windows
+from .harvest import harvest, read_windows, record_windows, write_windows
 from .jobs import Job, prepare, read_jobs, write_jobs
 from .market import MarketError, Result, RoutedJob, Waiting, run, write_outputs
 from .mechanism import (
@@ -21,11 +21,10 @@ from .mechanism import (
     candidates,
     grid_regret,
     offers,
-    record_windows,
     refined_regret,
     train_regretformer,
 )
-from .platform import (
+from .platforms import (
     Corona,
     Dane,
     DEFAULT_FEDERATION,

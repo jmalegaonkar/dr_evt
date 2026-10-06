@@ -28,6 +28,19 @@ def _drop_reason(row):
     return None
 
 
+def _bid(record, job_terms, usable, hardware, bids, seed):
+    """Return a job's bid on the platforms that can run it, in the requested form."""
+    if not usable:
+        return {}
+    if bids == "multi":
+        owner = record.identity if record.user is None else record.user
+        prices = {item.name: item.price_per_node_hour for item in usable}
+        return multi_bid(seed, record.source, owner, job_terms, prices)
+    # A single bid prices a unit of work at its mean cost over those platforms.
+    level = sum(item.price_per_node_hour / item.speed[hardware] for item in usable)
+    return single_bid(job_terms, level / len(usable))
+
+
 def prepare(
     traces,
     *,
@@ -102,39 +115,25 @@ def prepare(
     summary.update({f"persona:{name}": 0 for name in PERSONAS})
 
     origin = kept[0].submit if kept else 0
-    requirement_override = None if requires is None else frozenset(requires.split())
+    override = None if requires is None else frozenset(requires.split())
     jobs = []
     for index, record in enumerate(kept, start=1):
         job_rng = generator(seed, record.source, record.identity)
         # The hardware draw comes first and is always made, so neither an override
         # nor the bid rule moves any other draw.
         gpu = job_rng.random() < gpu_fraction
-        requirement_set = requirement_override
-        if requirement_set is None:
-            requirement_set = frozenset({"gpu"}) if gpu else frozenset()
+        needs = override if override is not None else frozenset({"gpu"} if gpu else ())
         job_terms = terms(seed, record.source, record.user, job_rng)
-        usable = [item for item in platforms if requirement_set <= item.hardware]
-        if not usable:
-            bid = {}
-        elif bids == "multi":
-            owner = record.identity if record.user is None else record.user
-            prices = {item.name: item.price_per_node_hour for item in usable}
-            bid = multi_bid(seed, record.source, owner, job_terms, prices)
-        else:
-            # The price level of a unit of work, averaged over the usable platforms.
-            hardware = "gpu" if "gpu" in requirement_set else "cpu"
-            level = sum(
-                item.price_per_node_hour / item.speed[hardware] for item in usable
-            ) / len(usable)
-            bid = single_bid(job_terms, level)
+        usable = [item for item in platforms if needs <= item.hardware]
+        hardware = "gpu" if "gpu" in needs else "cpu"
         jobs.append(
             Job(
                 f"j{index:06d}",
                 record.submit - origin,
                 record.nodes,
                 record.limit if record.runtime is None else record.runtime,
-                bid,
-                requirement_set,
+                _bid(record, job_terms, usable, hardware, bids, seed),
+                needs,
                 record.runtime,
                 record.limit,
                 record.source,

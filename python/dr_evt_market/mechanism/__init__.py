@@ -12,7 +12,7 @@ from .firstfit import FirstFit
 from .firstprice import FirstPrice
 from .regret import grid_regret, refined_regret
 from .regretformer import RegretFormer
-from .training import record_windows, train_regretformer
+from .training import train_regretformer
 from .vcg import Vcg
 
 MECHANISMS = {
@@ -33,7 +33,6 @@ __all__ = [
     "candidates",
     "grid_regret",
     "offers",
-    "record_windows",
     "refined_regret",
     "train_regretformer",
 ]

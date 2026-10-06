@@ -9,45 +9,9 @@
 
 import math
 
-from .base import Mechanism
 from .regret import _misreports
 
 _CHUNK = 2048
-
-
-class _Recorder(Mechanism):
-    """Record each window's batch and free nodes while another mechanism decides."""
-
-    name = "recorder"
-
-    def __init__(self, inner) -> None:
-        self.inner = inner
-        self.windows = []
-
-    def offers(self, job, platforms, free_nodes):
-        """Return the inner mechanism's offers, which the market checks against."""
-        return self.inner.offers(job, platforms, free_nodes)
-
-    def decide(self, jobs, platforms, free_nodes):
-        """Record the window, then return the inner mechanism's decisions."""
-        jobs = list(jobs)
-        if jobs:
-            self.windows.append((jobs, dict(free_nodes)))
-        return self.inner.decide(jobs, platforms, free_nodes)
-
-
-def record_windows(jobs, platforms, *, mechanism=None, window_s=60, prefix=32):
-    """Run the market and return every window's batch and free nodes.
-
-    The queue, and so every window, follows the mechanism that decides: VCG unless
-    another is given.
-    """
-    from ..market import run
-    from .vcg import Vcg
-
-    recorder = _Recorder(Vcg() if mechanism is None else mechanism)
-    run(jobs, platforms, recorder, window_s=window_s, prefix=prefix)
-    return recorder.windows
 
 
 def train_regretformer(
@@ -71,25 +35,14 @@ def train_regretformer(
 ):
     """Train RegretFormer's network on market windows under a regret budget.
 
-    The loss is RegretFormer's: minus the objective (the center's premiums, or
-    welfare), plus a multiplier times the regret, with the multiplier updated by
-    RegretFormer's rule against a budget that shrinks from `budget[0]` to
-    `budget[1]`. RegretFormer sets that budget as a fraction of revenue; here it is a
-    fraction of the jobs' available surplus (each job's best value over cost), since
-    premiums can rightly fall to zero where nodes are free, and a budget on them then
-    drives the multiplier without bound. A penalty weighted by `capacity` charges the
-    nodes the relaxed allocation overbooks, and the free nodes it leaves idle while
-    a job that fits them waits, since the market places every job that fits.
-    Misreports come from the item-wise grid on the relaxed outcome, for up to
-    `regret_jobs` jobs per window, instead of gradient ascent: a report of zero
-    withdraws an offer, which gradients cannot see, and the charge rule changes at
-    the posted price. The regret counts only reports at or above each posted price
-    unless `under_price`: a bid under the price wins only what is left and pays in
-    full, so shading under it pays under every mechanism, and counting it drives the
-    network to keep jobs waiting. Training runs on `device`; the trained network
-    comes back on the CPU. Returns the trained mechanism and each step's history,
-    whose regret is the relaxed network's: measure the deployed mechanism with
-    `refined_regret`.
+    The loss is minus the objective (the premiums over cost, or welfare), plus a
+    multiplier times the regret, plus a `capacity`-weighted penalty on overbooked and
+    idle nodes. The multiplier follows RegretFormer's rule against a budget that
+    shrinks from `budget[0]` to `budget[1]` of the jobs' available surplus. Regret
+    comes from grid misreports for up to `regret_jobs` jobs per window, and counts
+    reports under a posted price only with `under_price`. Returns the mechanism, back
+    on the CPU, and each step's history, whose regret is the relaxed network's: judge
+    the deployed mechanism with `refined_regret`.
     """
     import numpy as np
     import torch
@@ -118,6 +71,8 @@ def train_regretformer(
         return utility[index, owners]
 
     def regret(window, truth, utility, scale):
+        # Misreports come from a grid, not gradients: a report of zero withdraws an
+        # offer, and the charge rule changes at the posted price.
         picked, rows, owners, variants = [], [], [], []
         for row in range(len(truth)):
             present = np.flatnonzero(window.jobs[row].cpu().numpy())
@@ -193,6 +148,9 @@ def train_regretformer(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
         optimizer.step()
+        # The budget is a share of the jobs' surplus rather than of revenue: premiums
+        # rightly fall to zero where nodes are free, and a budget on them would drive
+        # the multiplier without bound.
         surplus = (window.value(truth) - window.cost()).clamp(min=0)
         surplus = surplus * window.offers(truth)
         available = (surplus.amax(-1).sum(-1) / scale).mean().item()

@@ -21,6 +21,12 @@ def _text(row, field: str) -> str | None:
     return None if value in {"", "-"} else value
 
 
+def _count(row, field: str) -> int | None:
+    """Return a whole-number field, or None when it is missing, blank or '-'."""
+    value = _text(row, field)
+    return None if value is None else math.floor(float(value))
+
+
 def _identity(row, field: str, order: int) -> str:
     """Return a stable identity from a trace identifier or file order."""
     value = _text(row, field)
@@ -32,8 +38,6 @@ def read_lc(source: str, path: str | Path) -> list[Row]:
     records = []
     with Path(path).open(newline="", encoding="utf-8") as stream:
         for order, row in enumerate(csv.DictReader(stream)):
-            raw_nodes = row["job.node.count"]
-            nodes = None if raw_nodes in {"", "-"} else int(float(raw_nodes))
             ran = row["t_run"].strip() != "-"
             if ran:
                 begin = math.floor(float(row["t_run"]))
@@ -51,7 +55,7 @@ def read_lc(source: str, path: str | Path) -> list[Row]:
                     order,
                     _identity(row, "job.id", order),
                     math.floor(float(row["t_submit"])),
-                    nodes,
+                    _count(row, "job.node.count"),
                     math.floor(limit),
                     runtime,
                     _text(row, "user.name"),
@@ -66,21 +70,15 @@ def read_simple(source: str, path: str | Path) -> list[Row]:
     records = []
     with Path(path).open(newline="", encoding="utf-8") as stream:
         for order, row in enumerate(csv.DictReader(stream)):
-            raw_nodes = row["num_nodes"]
-            nodes = None if raw_nodes in {"", "-"} else int(float(raw_nodes))
-            raw_runtime = row.get("actual_run_time")
-            runtime = (
-                None if raw_runtime in (None, "") else math.floor(float(raw_runtime))
-            )
             records.append(
                 Row(
                     source,
                     order,
                     _identity(row, "job_id", order),
                     math.floor(float(row["job_submit_time"])),
-                    nodes,
+                    _count(row, "num_nodes"),
                     math.floor(float(row["time_limit"])),
-                    runtime,
+                    _count(row, "actual_run_time"),
                     _text(row, "user"),
                     True,
                 )

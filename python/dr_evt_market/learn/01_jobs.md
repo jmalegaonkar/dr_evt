@@ -94,7 +94,12 @@ the same user name in two traces is two users.
 
 `write_jobs` writes the jobs file with fixed columns, plus one `bid:<platform>` column
 per platform when bids are per platform. `read_jobs` reads it back in row order and
-rejects a repeated `job_id`.
+rejects a repeated `job_id`. It needs `job_id`, `job_submit_time`, `num_nodes`,
+`time_limit` and `bid`; `requires`, `runtime`, `requested`, `source`, `user`, `persona`
+and the `bid:<platform>` columns are optional, and other columns are ignored. When any
+`bid:<platform>` cell of a row is filled, the job bids on those platforms only and its
+`bid` cell is ignored; a row with no bid at all bids on no platform. A hand-written jobs
+file follows the same rules, so the market runs any stream, prepared or not.
 
 ## 1.6 The fixture trace, row by row
 

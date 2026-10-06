@@ -10,8 +10,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-# Two amounts of money closer than this are equal: a bid exactly at the posted price
-# is not under it, and a charge may sit on either of its bounds.
+# Amounts of money closer than this count as equal, so rounding never puts a bid that
+# matches the posted price under it, or a charge just outside its bounds.
 TOLERANCE = 1.0e-9
 
 

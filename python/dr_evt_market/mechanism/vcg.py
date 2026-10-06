@@ -110,11 +110,9 @@ class Vcg(Mechanism):
         for job_index, job in enumerate(jobs):
             variable = chosen.get(job_index)
             if variable is None:
-                # The solve leaves out a job that fits the nodes left over only
-                # when it adds no welfare (it bids the posted price or under it)
-                # or, within the solver's tolerance, almost none. It displaces
-                # nobody, so its pivot is zero: it pays its cost, or its whole bid
-                # when that is less.
+                # The solve skips a job that still fits only when it adds no
+                # welfare: it bid the price, under it, or a hair above. It
+                # displaces nobody, so it pays its cost, or its whole bid if less.
                 offer = _leftover_offer(job, platforms, left)
                 if offer is not None:
                     left[offer[0]] -= job.num_nodes

@@ -16,7 +16,7 @@ from .harvest import harvest, read_windows, write_windows
 from .jobs import prepare, read_jobs, write_jobs
 from .market import run, write_outputs
 from .mechanism import MECHANISMS, train_regretformer
-from .platform import DEFAULT_FEDERATION, PROFILES, federation
+from .platforms import DEFAULT_FEDERATION, PROFILES, federation
 
 
 def _share(value):

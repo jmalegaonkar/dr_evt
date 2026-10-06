@@ -94,7 +94,7 @@ Code: `jobs/bids.py` (`terms`, `single_bid`, `multi_bid`) and the job loop of
 
 ## 3. Platforms
 
-Code: `platform/profiles.py` and `platform/base.py` (`Platform`).
+Code: `platforms.py` (`Platform`, the five machines and `federation`).
 
 The last two columns are the posted price divided by the speed: the cost of one
 reference node-hour of work on that machine.

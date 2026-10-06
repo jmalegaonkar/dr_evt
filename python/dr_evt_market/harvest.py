@@ -14,8 +14,40 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .jobs import Job
-from .mechanism import record_windows
-from .platform import DEFAULT_FEDERATION, federation
+from .market import run
+from .mechanism import Mechanism, Vcg
+from .platforms import DEFAULT_FEDERATION, federation
+
+
+class _Recorder(Mechanism):
+    """Record each window with jobs queued while another mechanism decides."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+        self.name = inner.name
+        self.windows = []
+
+    def offers(self, job, platforms, free_nodes):
+        """Return the inner mechanism's offers, which the market checks against."""
+        return self.inner.offers(job, platforms, free_nodes)
+
+    def decide(self, jobs, platforms, free_nodes):
+        """Record the window, then return the inner mechanism's decisions."""
+        jobs = list(jobs)
+        if jobs:
+            self.windows.append((jobs, dict(free_nodes)))
+        return self.inner.decide(jobs, platforms, free_nodes)
+
+
+def record_windows(jobs, platforms, *, mechanism=None, window_s=60, prefix=32):
+    """Run the market and return every window's batch and free nodes.
+
+    The queue, and so every window, follows the mechanism that decides: VCG unless
+    another is given.
+    """
+    recorder = _Recorder(Vcg() if mechanism is None else mechanism)
+    run(jobs, platforms, recorder, window_s=window_s, prefix=prefix)
+    return recorder.windows
 
 
 def _facts(platforms):

@@ -5,8 +5,7 @@ and a dr_evt simulation of the share of it that the federation sees. This page c
 the five machines, the share, what a job costs and how long it holds nodes on each, and
 how a platform drives its simulation. The overview of all steps is `master_overview.md`.
 
-Code: `platform/base.py` (`Platform`) and `platform/profiles.py` (the five machines and
-`federation`).
+Code: `platforms.py` (`Platform`, the five machines and `federation`).
 
 ## 3.1 The five machines
 
