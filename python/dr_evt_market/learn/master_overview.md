@@ -25,7 +25,7 @@ LC traces --prepare--> jobs.csv --run--> every 60 s: admit arrivals
 - **The market never turns a job away.** A job waits in the queue until a platform it
   bid on has room for it, and every winner starts in the window it wins.
 
-Each step has a detailed page: `01_jobs.md` to `06_mechanisms.md` so far.
+Each step has a detailed page, from `01_jobs.md` to `07_outputs.md`.
 
 ## 1. Jobs: sourcing and cleaning
 
@@ -178,10 +178,10 @@ Details, with the math and three jobs followed through each: `06_mechanisms.md`.
 
 ## 7. Outputs and commands
 
-Code: `market.py` (`write_outputs`) and `cli.py`.
+Code: `market.py` (`write_outputs`) and `cli.py`. Details: `07_outputs.md`.
 
 - **`routed.csv`**: each routed job's platform, window, cost, value, premium, charge,
-  and submit, begin and end times.
+  and submit, begin and end times, in the order placed.
 - **`waiting.csv`**: the jobs that never ran, with the reason.
 - **`service.csv`**: for each community (the job's source) and for `all`: the count,
   the mean wait, the mean wait weighted by node-hours, and the mean bounded slowdown
@@ -191,4 +191,5 @@ Code: `market.py` (`write_outputs`) and `cli.py`.
   of charges), the counts, and the SHA-256 digest of `routed.csv`.
 
 The commands are `python -m dr_evt_market prepare` (traces to a jobs file), `run` (a
-jobs file through one mechanism) and `train` (RegretFormer on the windows of a VCG run).
+jobs file through one mechanism), `harvest` (the windows of runs under several
+mechanisms, to a file) and `train` (RegretFormer on harvested windows).

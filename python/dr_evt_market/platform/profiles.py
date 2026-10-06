@@ -75,7 +75,7 @@ class Tuolumne(Platform):
 
 PLATFORMS = (Corona, Dane, Matrix, Tioga, Tuolumne)
 DEFAULT_FEDERATION = ("corona", "dane", "matrix", "tioga", "tuolumne")
-_PROFILES = {profile.name: profile for profile in PLATFORMS}
+PROFILES = {profile.name: profile for profile in PLATFORMS}
 
 
 def federation(work_dir, share=1.0, names=DEFAULT_FEDERATION) -> dict[str, Platform]:
@@ -84,9 +84,7 @@ def federation(work_dir, share=1.0, names=DEFAULT_FEDERATION) -> dict[str, Platf
     mapped = isinstance(share, Mapping)
     try:
         return {
-            name: _PROFILES[name](
-                root / name, share.get(name, 1.0) if mapped else share
-            )
+            name: PROFILES[name](root / name, share.get(name, 1.0) if mapped else share)
             for name in names
         }
     except KeyError as error:

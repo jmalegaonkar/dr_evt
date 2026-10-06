@@ -144,16 +144,21 @@ learned mechanism, and reports beside it the gradient-only estimate that RegretF
 own protocol gives.
 
 `record_windows(jobs, platforms)` runs the market, under VCG unless another mechanism
-is given, and returns every window's batch and free nodes. `train_regretformer(windows,
+is given, and returns every window's batch and free nodes. `harvest(streams,
+mechanisms)` does so for every stream under every mechanism, and `write_windows` and
+`read_windows` keep the windows in a gzipped JSON lines file with the federation's
+facts, so training needs neither the traces nor dr_evt. `train_regretformer(windows,
 platforms)` trains the network on them with RegretFormer's recipe: it maximizes the
 center's premiums (or welfare, with `objective="welfare"`) less a multiplier times the
 regret, and raises the multiplier while the regret exceeds a budget that shrinks from 1
 to 0.1 percent of the jobs' available surplus. Misreports come from the item-wise grid,
-not gradient ascent. A penalty keeps the relaxed allocation within the free nodes and
-stops it from holding back jobs that fit, since the market places those anyway. The
-regret that training reports is measured on the relaxed network and can be far below
-that of the mechanism the market applies: judge a trained network by `refined_regret`
-on windows it was not trained on.
+not gradient ascent, and by default only reports at or above each posted price count:
+shading under the price pays under every mechanism, and counting it drives the network
+to keep jobs waiting. A penalty keeps the relaxed allocation within the free nodes and
+stops it from holding back jobs that fit, since the market places those anyway.
+`device="cuda"` trains on a GPU. The regret that training reports is measured on the
+relaxed network and can be far below that of the mechanism the market applies: judge a
+trained network by `refined_regret` on windows it was not trained on.
 
 At each fixed window, the market advances every platform, admits arrivals, auctions the
 first `prefix` queued jobs that can be placed now, submits winners, and advances again;
@@ -167,16 +172,18 @@ and streamed jobs run their speed-adjusted limit.
 
 ## Outputs
 
-`run` writes `routed.csv`, `waiting.csv`, `service.csv`, and `summary.json`. The routed
-ledger holds the chosen platform, cost, value, premium (the charge minus the cost,
-negative for a job that bid under the price), charge, and timing. A routed job's
-community is its `source`, or the empty string when absent. `service.csv` has one row
-per community plus `all`: count, mean wait (`begin_s - submit_s`), node-hour-weighted
-mean wait with weight `num_nodes * (end_s - begin_s) / 3600`, and mean bounded slowdown
+`run` writes `routed.csv`, `waiting.csv`, `service.csv`, and `summary.json`, and the
+command line writes nothing else to its output directory. The routed ledger has one row
+per winner in the order placed: the platform, the window, the cost, value, premium (the
+charge minus the cost, negative for a job that bid under the price) and charge, and the
+submit, begin and end times. A routed job's community is its `source`, or the empty
+string when absent. `service.csv` has one row per community plus `all`: count, mean wait
+(`begin_s - submit_s`), node-hour-weighted mean wait with weight
+`num_nodes * (end_s - begin_s) / 3600`, and mean bounded slowdown
 `max(1, (wait + run) / max(run, 10))`, where `run = end_s - begin_s`. The summary
 repeats these measures under `service`, along with the resolved configuration, each
 platform's completed jobs, utilization and makespan from dr_evt, welfare, revenue,
-counts, and the SHA-256 digest of `routed.csv`.
+counts, and the SHA-256 digest of `routed.csv`. `learn/07_outputs.md` gives every field.
 
 The market turns no job away. A job that no platform could run, even with every node
 free, waits outside the auction: no platform has its `hardware`, it is `oversize` for
@@ -199,12 +206,14 @@ python -m dr_evt_market run --jobs jobs.csv --out results --share 0.1 \
 
 `--mechanism` is `vcg` (the default), `firstprice` for pay what you bid, `firstfit` for
 the bid-blind no-market baseline, or `regretformer` with `--checkpoint PATH` for a saved
-network. To train one, record the windows of a VCG run on the same jobs and federation
-and train on them:
+network. To train one, harvest the windows of market runs on one federation, under one
+or more mechanisms, then train on them, anywhere torch runs:
 
 ```bash
-python -m dr_evt_market train --jobs jobs.csv --out network.pt --share 0.2 \
-  --objective revenue --steps 2000
+python -m dr_evt_market harvest --jobs day1.csv --jobs day2.csv --out windows.jsonl.gz \
+  --share 0.2 --mechanism vcg --mechanism firstprice --mechanism firstfit
+python -m dr_evt_market train --windows windows.jsonl.gz --out network.pt \
+  --objective revenue --steps 2000 --device cuda
 ```
 
 Prepare one merged interval from LC traces:

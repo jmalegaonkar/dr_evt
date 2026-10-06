@@ -24,6 +24,10 @@ class _Recorder(Mechanism):
         self.inner = inner
         self.windows = []
 
+    def offers(self, job, platforms, free_nodes):
+        """Return the inner mechanism's offers, which the market checks against."""
+        return self.inner.offers(job, platforms, free_nodes)
+
     def decide(self, jobs, platforms, free_nodes):
         """Record the window, then return the inner mechanism's decisions."""
         jobs = list(jobs)
@@ -61,6 +65,8 @@ def train_regretformer(
     span=4.0,
     capacity=10.0,
     seed=0,
+    under_price=False,
+    device="cpu",
     **shape,
 ):
     """Train RegretFormer's network on market windows under a regret budget.
@@ -77,9 +83,13 @@ def train_regretformer(
     Misreports come from the item-wise grid on the relaxed outcome, for up to
     `regret_jobs` jobs per window, instead of gradient ascent: a report of zero
     withdraws an offer, which gradients cannot see, and the charge rule changes at
-    the posted price. Returns
-    the trained mechanism and each step's history, whose regret is the relaxed
-    network's: measure the deployed mechanism with `refined_regret`.
+    the posted price. The regret counts only reports at or above each posted price
+    unless `under_price`: a bid under the price wins only what is left and pays in
+    full, so shading under it pays under every mechanism, and counting it drives the
+    network to keep jobs waiting. Training runs on `device`; the trained network
+    comes back on the CPU. Returns the trained mechanism and each step's history,
+    whose regret is the relaxed network's: measure the deployed mechanism with
+    `refined_regret`.
     """
     import numpy as np
     import torch
@@ -102,25 +112,29 @@ def train_regretformer(
 
     def misreported(window, truth, rows, owners, prices):
         reports = truth[rows].clone()
-        reports[torch.arange(len(rows)), owners] = prices
+        index = torch.arange(len(rows), device=reports.device)
+        reports[index, owners] = prices
         utility = outcome(window.take(rows), reports, truth[rows])[-1]
-        return utility[torch.arange(len(rows)), owners]
+        return utility[index, owners]
 
     def regret(window, truth, utility, scale):
         picked, rows, owners, variants = [], [], [], []
         for row in range(len(truth)):
-            present = np.flatnonzero(window.jobs[row].numpy())
+            present = np.flatnonzero(window.jobs[row].cpu().numpy())
             count = min(regret_jobs, len(present))
             posted = window.posted[row].tolist()
             for job in rng.choice(present, size=count, replace=False):
                 picked.append((row, int(job), len(present) / count))
                 prices = truth[row, job].tolist()
-                for _, variant in _misreports(prices, posted, points, span):
+                for _, variant in _misreports(
+                    prices, posted, points, span, under_price
+                ):
                     rows.append(row)
                     owners.append(int(job))
                     variants.append(variant)
-        rows, owners = torch.tensor(rows), torch.tensor(owners)
-        variants = torch.tensor(variants, dtype=torch.float64)
+        rows = torch.tensor(rows, device=device)
+        owners = torch.tensor(owners, device=device)
+        variants = torch.tensor(variants, dtype=torch.float64, device=device)
         with torch.no_grad():
             scores = torch.cat(
                 [
@@ -138,15 +152,17 @@ def train_regretformer(
         for row, job, _ in picked:
             mine = torch.nonzero((rows == row) & (owners == job)).squeeze(1)
             best.append(variants[mine[scores[mine].argmax()]])
-        at = torch.tensor([row for row, _, _ in picked])
-        who = torch.tensor([job for _, job, _ in picked])
-        spread = torch.tensor([share for _, _, share in picked], dtype=torch.float64)
+        at = torch.tensor([row for row, _, _ in picked], device=device)
+        who = torch.tensor([job for _, job, _ in picked], device=device)
+        spread = torch.tensor(
+            [share for _, _, share in picked], dtype=torch.float64, device=device
+        )
         gain = misreported(window, truth, at, who, torch.stack(best)) - utility[at, who]
         return (torch.relu(gain) * spread / scale[at]).sum() / len(truth)
 
     rng = np.random.default_rng(seed)
     mechanism = RegretFormer(seed=seed, **shape)
-    net = mechanism.net.train()
+    net = mechanism.net.to(device).train()
     optimizer = torch.optim.Adam(net.parameters(), lr=rate)
     multiplier, (target, end) = 1.0, budget
     shrink = (end / target) ** (1.5 / steps)
@@ -155,6 +171,7 @@ def train_regretformer(
     for _ in range(steps):
         chosen = rng.choice(len(windows), size=min(batch, len(windows)), replace=False)
         window = learned.window([windows[index] for index in chosen], platforms)
+        window = window.to(device)
         truth, scale = window.prices, window.scale()
         allocation, waiting, premium, utility = outcome(window, truth, truth)
         if objective == "revenue":
@@ -192,5 +209,5 @@ def train_regretformer(
         )
         for key, value in zip(keys, values):
             history[key].append(value)
-    net.eval()
+    net.to("cpu").eval()
     return mechanism, history

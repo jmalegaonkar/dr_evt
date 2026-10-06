@@ -109,6 +109,9 @@ class MarketTests(unittest.TestCase):
             [("j000014", "oversize", 180)],
         )
         # j000015 bids under Corona's price, wins it anyway, and pays its whole bid.
+        # j000003 displaces nobody, so it pays exactly its cost.
+        premiums = {row.job_id: row.premium for row in result.routed}
+        self.assertEqual(premiums["j000003"], 0.0)
         under = [row for row in result.routed if row.value < row.cost]
         self.assertEqual(
             [(row.job_id, row.platform) for row in under], [("j000015", "corona")]
@@ -123,7 +126,7 @@ class MarketTests(unittest.TestCase):
             {"corona", "dane", "matrix", "tioga", "tuolumne"},
         )
         for row in result.routed:
-            self.assertEqual(row.begin_s, row.window_s)
+            self.assertEqual(row.begin_s, row.window * 60)
             job = by_id[row.job_id]
             hardware = "gpu" if "gpu" in job.requires else "cpu"
             speed = result.configuration["platforms"][row.platform]["speed"][hardware]
@@ -145,7 +148,7 @@ class MarketTests(unittest.TestCase):
         # This changes only when the fixture or the model changes.
         self.assertEqual(
             outputs["sha256"],
-            "44660331f90ca7cb142cde52d9f47ae8d953bccd47ac6a55646cd802619436cd",
+            "960f2328047bb667fe055682833afaaab500fd2e8a8249d3ad0af68575ac0344",
         )
 
     def test_routed_output_is_byte_identical(self) -> None:
@@ -216,6 +219,25 @@ class MarketTests(unittest.TestCase):
         per_window = collections.Counter(row.window for row in result.routed)
         self.assertEqual(len(result.routed), 19)
         self.assertTrue(all(count <= 2 for count in per_window.values()))
+
+    def test_an_idle_stretch_is_skipped(self) -> None:
+        """With nothing queued, the loop goes straight to the next arrival's window."""
+        decided = []
+
+        class _Counting(Vcg):
+            def decide(self, jobs, platforms, free_nodes):
+                decided.append(len(jobs))
+                return super().decide(jobs, platforms, free_nodes)
+
+        jobs = [Job("early", 0, 1, 60, 2.0), Job("late", 10_000_000, 1, 60, 2.0)]
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share=0.1, names=("corona",))
+            result = run(jobs, platforms, _Counting())
+        self.assertEqual(decided, [1, 1])
+        self.assertEqual(
+            {row.job_id: row.begin_s for row in result.routed},
+            {"early": 0, "late": 10_000_020},
+        )
 
     def test_wide_head_job_does_not_block_prefix(self) -> None:
         """A temporarily wide head job does not hide a placeable job."""
@@ -367,9 +389,13 @@ class MarketTests(unittest.TestCase):
             self.assertIn("windows=6", completed.stdout.splitlines())
             self.assertIn("routed=19", completed.stdout.splitlines())
             self.assertIn("waiting=1", completed.stdout.splitlines())
+            self.assertEqual(
+                sorted(path.name for path in (root / "run").iterdir()),
+                ["routed.csv", "service.csv", "summary.json", "waiting.csv"],
+            )
             self.assertIn(
                 "routed_sha256="
-                "44660331f90ca7cb142cde52d9f47ae8d953bccd47ac6a55646cd802619436cd",
+                "960f2328047bb667fe055682833afaaab500fd2e8a8249d3ad0af68575ac0344",
                 completed.stdout.splitlines(),
             )
             first_price = subprocess.run(

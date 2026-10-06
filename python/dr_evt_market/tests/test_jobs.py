@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from dr_evt_market import (
     DEFAULT_FEDERATION,
     PLATFORMS,
+    PROFILES,
     Job,
     prepare,
     read_jobs,
@@ -25,7 +26,6 @@ from dr_evt_market import (
 from dr_evt_market.cli import main
 
 _DATA = Path(__file__).with_name("data")
-_PROFILES = {profile.name: profile for profile in PLATFORMS}
 
 
 def _simple(directory, rows, header="job_submit_time,num_nodes,time_limit,user"):
@@ -358,7 +358,7 @@ class JobTests(unittest.TestCase):
             [
                 job.bid["tioga"]
                 for job in prepare(
-                    traces, platforms=[_PROFILES[name] for name in listed], **options
+                    traces, platforms=[PROFILES[name] for name in listed], **options
                 )[0]
             ]
             for listed in names
@@ -447,7 +447,7 @@ class JobTests(unittest.TestCase):
             )
             direct, _ = prepare(
                 {"community": trace},
-                platforms=[_PROFILES[name] for name in DEFAULT_FEDERATION],
+                platforms=[PROFILES[name] for name in DEFAULT_FEDERATION],
                 trace_format="simple",
                 seed=8,
             )

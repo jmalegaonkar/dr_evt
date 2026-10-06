@@ -48,6 +48,17 @@ class GridRegretTests(unittest.TestCase):
         # The grid's least positive price is 4 x 3.0 / 100 = 0.12.
         self.assertAlmostEqual(regret["shade"], (1.5 - 0.12) * 2 * 360 / 3600)
 
+    def test_reports_at_or_above_the_price_leave_vcg_without_regret(self) -> None:
+        """Without bids under the price, VCG has no regret and shading stops there."""
+        job = Job("shade", 0, 2, 360, 3.0, {"gpu"})
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share=0.1, names=("corona",))
+            free = {"corona": 12}
+            vcg = grid_regret(Vcg(), [job], platforms, free, under_price=False)
+            paid = grid_regret(FirstPrice(), [job], platforms, free, under_price=False)
+        self.assertAlmostEqual(vcg["shade"], 0.0)
+        self.assertAlmostEqual(paid["shade"], (3.0 - 1.5) * 2 * 360 / 3600)
+
     def test_first_fit_has_no_regret(self) -> None:
         """FirstFit reads no bid, so no report changes what a job gets or pays."""
         with tempfile.TemporaryDirectory() as directory:

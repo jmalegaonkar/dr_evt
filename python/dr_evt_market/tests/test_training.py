@@ -16,12 +16,16 @@ import unittest
 from pathlib import Path
 
 from dr_evt_market import (
+    FirstFit,
     Vcg,
     federation,
+    harvest,
     read_jobs,
+    read_windows,
     record_windows,
     run,
     train_regretformer,
+    write_windows,
 )
 
 _DATA = Path(__file__).with_name("data")
@@ -64,6 +68,56 @@ class RecordWindowsTests(unittest.TestCase):
         self.assertEqual(batched, {row.job_id for row in result.routed})
 
 
+class HarvestTests(unittest.TestCase):
+    """Harvest windows under several mechanisms, and save and load them."""
+
+    def test_windows_survive_a_file(self) -> None:
+        """Every harvested window comes back with its tags, free nodes and jobs."""
+        jobs = read_jobs(_DATA / "jobs.csv")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            windows = harvest(
+                {"fixture": jobs}, {"vcg": Vcg, "firstfit": FirstFit}, share=0.1
+            )
+            platforms = federation(root / "facts", share=0.1)
+            write_windows(root / "windows.jsonl.gz", windows, platforms)
+            loaded_platforms, loaded = read_windows(
+                [root / "windows.jsonl.gz"], root / "read"
+            )
+        self.assertEqual(
+            {window["mechanism"] for window in windows}, {"vcg", "firstfit"}
+        )
+        self.assertEqual(loaded, windows)
+        self.assertEqual(
+            {name: item.exposed_nodes for name, item in loaded_platforms.items()},
+            {name: item.exposed_nodes for name, item in platforms.items()},
+        )
+
+    def test_platform_facts_need_no_simulation(self) -> None:
+        """A federation's prices, sizes and costs load without dr_evt."""
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.modules['dr_evt'] = None\n"
+                "from dr_evt_market import Job, federation\n"
+                "platforms = federation('unused', share=0.1)\n"
+                "job = Job('a', 0, 2, 3600, 1.0)\n"
+                "print(platforms['tuolumne'].exposed_nodes,"
+                " round(platforms['dane'].cost(job), 4))",
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(
+                    (str(_ROOT / "install/lib/python"), str(_ROOT / "python"))
+                ),
+            },
+        )
+        self.assertEqual(completed.stdout.split(), ["115", "0.4181"], completed.stderr)
+
+
 @unittest.skipUnless(_TORCH, "RegretFormer needs torch")
 class TrainingTests(unittest.TestCase):
     """Train briefly and deploy the result."""
@@ -90,24 +144,35 @@ class TrainingTests(unittest.TestCase):
         self.assertEqual(len(result.routed) + len(result.waiting), len(jobs))
 
     def test_command_line_trains_a_network_that_runs(self) -> None:
-        """The train command writes a checkpoint that the run command uses."""
+        """Harvested windows train a checkpoint that the run command uses."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             jobs = str(_DATA / "jobs.csv")
+            windows = str(root / "windows.jsonl.gz")
             network = str(root / "network.pt")
-            trained = _command(
-                "train",
+            harvested = _command(
+                "harvest",
                 "--jobs",
                 jobs,
                 "--out",
-                network,
+                windows,
                 "--share",
                 "0.1",
-                "--steps",
-                "2",
+                "--mechanism",
+                "vcg",
+                "--mechanism",
+                "firstfit",
+            )
+            self.assertEqual(harvested.returncode, 0, harvested.stderr)
+            self.assertIn("windows:vcg=6", harvested.stdout.splitlines())
+            trained = _command(
+                "train", "--windows", windows, "--out", network, "--steps", "2"
             )
             self.assertEqual(trained.returncode, 0, trained.stderr)
-            self.assertIn("windows=6", trained.stdout.splitlines())
+            self.assertIn(
+                f"windows={harvested.stdout.split()[0].split('=')[1]}",
+                trained.stdout.splitlines(),
+            )
             ran = _command(
                 "run",
                 "--jobs",

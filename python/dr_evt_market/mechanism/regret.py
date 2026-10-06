@@ -15,7 +15,7 @@ lower bound on the regret.
 
 from dataclasses import dataclass, replace
 
-from .base import job_value
+from .base import TOLERANCE, job_value
 
 _CHUNK = 512
 
@@ -40,9 +40,10 @@ def _prices(job, names, platforms):
     ]
 
 
-def _misreports(prices, posted, points, span):
+def _misreports(prices, posted, points, span, under_price=True):
     # Pairs of (item, prices): each price moved alone, then the whole report scaled
     # (item -1). The levels include the posted prices, where the charge rule changes.
+    # Without `under_price`, a report bids at or above each price, or not at all.
     top = max(prices)
     levels = [top * span * step / (points - 1) for step in range(points)]
     variants = []
@@ -52,7 +53,15 @@ def _misreports(prices, posted, points, span):
     factors = [span * step / (points - 1) for step in range(points)]
     factors += [cutoff / price for cutoff, price in zip(posted, prices) if price > 0]
     variants += [(-1, [factor * price for price in prices]) for factor in factors]
-    return variants
+    if under_price:
+        return variants
+    return [
+        (item, report)
+        for item, report in variants
+        if all(
+            price <= 0 or price + TOLERANCE >= cut for price, cut in zip(report, posted)
+        )
+    ]
 
 
 def _utility(job, decisions, platforms):
@@ -62,13 +71,16 @@ def _utility(job, decisions, platforms):
     return 0.0
 
 
-def grid_regret(mechanism, jobs, platforms, free_nodes, *, points=101, span=4.0):
+def grid_regret(
+    mechanism, jobs, platforms, free_nodes, *, points=101, span=4.0, under_price=True
+):
     """Return each job's item-wise grid regret in one window, for any mechanism.
 
     One price at a time moves over `points` levels from zero to `span` times the
     job's highest price, and to that platform's posted price; then the whole report
     is scaled over the same range and to each posted price. The best gain over the
-    truthful utility is a lower bound on the job's regret.
+    truthful utility is a lower bound on the job's regret. Without `under_price`,
+    only reports that bid at or above each posted price, or not at all, count.
     """
     jobs = list(jobs)
     names = list(platforms)
@@ -79,7 +91,7 @@ def grid_regret(mechanism, jobs, platforms, free_nodes, *, points=101, span=4.0)
         truth = _utility(job, truthful, platforms)
         best = truth
         for _, prices in _misreports(
-            _prices(job, names, platforms), posted, points, span
+            _prices(job, names, platforms), posted, points, span, under_price
         ):
             report = replace(job, bid=dict(zip(names, prices)))
             reports = jobs[:index] + [report] + jobs[index + 1 :]
@@ -103,6 +115,7 @@ def refined_regret(
     rate=0.02,
     gradient_steps=1000,
     seed=0,
+    under_price=True,
 ) -> dict[str, Estimates]:
     """Return RegretFormer's regret per job: grid, refined, and gradient alone.
 
@@ -112,7 +125,7 @@ def refined_regret(
     point and of the truth (`sigma` times the job's highest price) and `starts`
     uniform draws, with every end point scored on the deployed mechanism. `gradient`
     is RegretFormer's own protocol: ascent from one uniform draw, scored on the
-    relaxed network.
+    relaxed network. `under_price` limits the grid as in `grid_regret`.
     """
     import numpy as np
     import torch
@@ -181,7 +194,9 @@ def refined_regret(
     posted = base.posted[0].tolist()
     rows, items, variants = [], [], []
     for job in range(size):
-        for item, prices in _misreports(truth[job].tolist(), posted, points, span):
+        for item, prices in _misreports(
+            truth[job].tolist(), posted, points, span, under_price
+        ):
             rows.append(job)
             items.append(item)
             variants.append(prices)

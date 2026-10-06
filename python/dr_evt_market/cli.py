@@ -5,19 +5,18 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""The command line: run a market, train RegretFormer, prepare a trace."""
+"""The command line: prepare traces, run a market, harvest windows, train."""
 
 import argparse
 import sys
 import tempfile
 from pathlib import Path
 
+from .harvest import harvest, read_windows, write_windows
 from .jobs import prepare, read_jobs, write_jobs
 from .market import run, write_outputs
-from .mechanism import MECHANISMS, record_windows, train_regretformer
-from .platform import DEFAULT_FEDERATION, PLATFORMS, federation
-
-_PROFILES = {profile.name: profile for profile in PLATFORMS}
+from .mechanism import MECHANISMS, train_regretformer
+from .platform import DEFAULT_FEDERATION, PROFILES, federation
 
 
 def _share(value):
@@ -29,7 +28,7 @@ def _share(value):
     shares = {}
     for item in value.split(","):
         name, separator, raw_share = item.partition("=")
-        if not separator or name not in _PROFILES:
+        if not separator or name not in PROFILES:
             raise argparse.ArgumentTypeError(f"invalid platform share {item!r}")
         try:
             shares[name] = float(raw_share)
@@ -54,18 +53,26 @@ def _parser():
     run_parser.add_argument("--checkpoint", type=Path)
     run_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
 
+    harvest_parser = commands.add_parser("harvest", help="record windows to train on")
+    harvest_parser.add_argument("--jobs", action="append", required=True, type=Path)
+    harvest_parser.add_argument("--out", required=True, type=Path)
+    harvest_parser.add_argument("--mechanism", action="append", choices=MECHANISMS)
+    harvest_parser.add_argument("--checkpoint", type=Path)
+    harvest_parser.add_argument("--share", type=_share, default=1.0)
+    harvest_parser.add_argument("--prefix", type=int, default=32)
+    harvest_parser.add_argument("--window", type=int, default=60)
+    harvest_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
+
     train_parser = commands.add_parser("train", help="train RegretFormer")
-    train_parser.add_argument("--jobs", required=True, type=Path)
+    train_parser.add_argument("--windows", action="append", required=True, type=Path)
     train_parser.add_argument("--out", required=True, type=Path)
-    train_parser.add_argument("--share", type=_share, default=1.0)
-    train_parser.add_argument("--prefix", type=int, default=32)
-    train_parser.add_argument("--window", type=int, default=60)
-    train_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
     train_parser.add_argument(
         "--objective", choices=("revenue", "welfare"), default="revenue"
     )
     train_parser.add_argument("--steps", type=int, default=2000)
     train_parser.add_argument("--seed", type=int, default=0)
+    train_parser.add_argument("--under-price", action="store_true")
+    train_parser.add_argument("--device", default="cpu")
 
     prepare_parser = commands.add_parser("prepare", help="prepare trace jobs")
     prepare_parser.add_argument("--trace", action="append", required=True)
@@ -84,32 +91,31 @@ def _parser():
 
 def _names(value):
     names = tuple(value.split(","))
-    unknown = next((name for name in names if name not in _PROFILES), None)
+    unknown = next((name for name in names if name not in PROFILES), None)
     if unknown is not None:
         raise ValueError(f"unknown platform {unknown!r}")
     return names
 
 
-def _mechanism(args):
-    if args.mechanism != "regretformer":
-        return MECHANISMS[args.mechanism]()
-    if args.checkpoint is None:
+def _maker(name, checkpoint):
+    if name != "regretformer":
+        return MECHANISMS[name]
+    if checkpoint is None:
         raise ValueError("--mechanism regretformer needs --checkpoint")
-    return MECHANISMS[args.mechanism](args.checkpoint)
+    return lambda: MECHANISMS[name](checkpoint)
 
 
 def _run(args):
-    mechanism = _mechanism(args)
-    platforms = federation(
-        args.out / "platforms", args.share, names=_names(args.platforms)
-    )
-    result = run(
-        read_jobs(args.jobs),
-        platforms,
-        mechanism,
-        window_s=args.window,
-        prefix=args.prefix,
-    )
+    mechanism = _maker(args.mechanism, args.checkpoint)()
+    with tempfile.TemporaryDirectory() as directory:
+        platforms = federation(directory, args.share, names=_names(args.platforms))
+        result = run(
+            read_jobs(args.jobs),
+            platforms,
+            mechanism,
+            window_s=args.window,
+            prefix=args.prefix,
+        )
     paths = write_outputs(result, args.out)
     windows = max((row.window for row in result.routed), default=-1) + 1
     print(f"windows={windows}")
@@ -118,25 +124,53 @@ def _run(args):
     print(f"routed_sha256={paths['sha256']}")
 
 
-def _train(args):
+def _harvest(args):
+    streams = {}
+    for path in args.jobs:
+        if path.stem in streams:
+            raise ValueError(f"two jobs files named {path.stem!r}")
+        streams[path.stem] = read_jobs(path)
+    names = args.mechanism or ["vcg"]
+    windows = harvest(
+        streams,
+        {name: _maker(name, args.checkpoint) for name in names},
+        share=args.share,
+        names=_names(args.platforms),
+        window_s=args.window,
+        prefix=args.prefix,
+    )
     with tempfile.TemporaryDirectory() as directory:
         platforms = federation(directory, args.share, names=_names(args.platforms))
-        windows = record_windows(
-            read_jobs(args.jobs), platforms, window_s=args.window, prefix=args.prefix
+        write_windows(args.out, windows, platforms)
+    print(f"windows={len(windows)}")
+    for name in names:
+        print(
+            f"windows:{name}={sum(window['mechanism'] == name for window in windows)}"
         )
+    sizes = [len(window["jobs"]) for window in windows]
+    print(f"one_job={sizes.count(1)}")
+    print(f"full_batch={sizes.count(args.prefix)}")
+
+
+def _train(args):
+    with tempfile.TemporaryDirectory() as directory:
+        platforms, windows = read_windows(args.windows, directory)
         mechanism, history = train_regretformer(
-            windows,
+            [(window["jobs"], window["free"]) for window in windows],
             platforms,
             objective=args.objective,
             steps=args.steps,
             seed=args.seed,
+            under_price=args.under_price,
+            device=args.device,
         )
     mechanism.save(
         args.out,
         objective=args.objective,
         steps=args.steps,
         windows=len(windows),
-        share=args.share,
+        files=[str(path) for path in args.windows],
+        under_price=args.under_price,
     )
     print(f"windows={len(windows)}")
     for key in ("objective", "regret", "multiplier"):
@@ -153,7 +187,7 @@ def _prepare(args):
         traces[name] = Path(path)
     jobs, summary = prepare(
         traces,
-        platforms=[_PROFILES[name] for name in _names(args.platforms)],
+        platforms=[PROFILES[name] for name in _names(args.platforms)],
         bids=args.bids,
         trace_format=args.format,
         start=args.start,
@@ -171,8 +205,9 @@ def _prepare(args):
 def main(argv=None) -> int:
     """Parse arguments, run the selected command, and return its status."""
     args = _parser().parse_args(argv)
+    commands = {"prepare": _prepare, "run": _run, "harvest": _harvest, "train": _train}
     try:
-        {"run": _run, "train": _train, "prepare": _prepare}[args.command](args)
+        commands[args.command](args)
     except (ImportError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

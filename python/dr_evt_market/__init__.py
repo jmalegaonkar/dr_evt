@@ -7,6 +7,7 @@
 
 """A federation market over DR_EVT: five platforms, a job stream, an auction."""
 
+from .harvest import harvest, read_windows, write_windows
 from .jobs import Job, prepare, read_jobs, write_jobs
 from .market import MarketError, Result, RoutedJob, Waiting, run, write_outputs
 from .mechanism import (
@@ -31,6 +32,7 @@ from .platform import (
     Matrix,
     Platform,
     PLATFORMS,
+    PROFILES,
     Tioga,
     Tuolumne,
     federation,
@@ -57,16 +59,20 @@ __all__ = [
     "Vcg",
     "Waiting",
     "PLATFORMS",
+    "PROFILES",
     "candidates",
     "federation",
     "grid_regret",
+    "harvest",
     "offers",
     "prepare",
     "read_jobs",
+    "read_windows",
     "record_windows",
     "refined_regret",
     "run",
     "train_regretformer",
     "write_outputs",
     "write_jobs",
+    "write_windows",
 ]

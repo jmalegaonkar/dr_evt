@@ -26,37 +26,42 @@ class Platform:
     speed: dict[str, float]
 
     def __init__(self, work_dir: str | Path, share: float = 1.0) -> None:
-        """Create the platform's header file and streaming simulation."""
+        """Set the exposed share; the dr_evt simulation starts on first use."""
         if (
             isinstance(share, bool)
             or not isinstance(share, Real)
             or not 0 <= share <= 1
         ):
             raise ValueError("share must be a number in [0, 1]")
-
-        import dr_evt
-
         self.share = float(share)
         self.exposed_nodes = round(self.total_nodes * self.share)
         self._work_dir = Path(work_dir).resolve()
-        self._work_dir.mkdir(parents=True, exist_ok=True)
-        self._header_path = self._work_dir / f"{self.name}.csv"
-        self._header_path.write_text(
-            "job_submit_time,num_nodes,q_id,time_limit\n", encoding="utf-8"
-        )
-
-        params = dr_evt.SimParams()
-        params.infile = str(self._header_path)
-        params.total_nodes = self.exposed_nodes
-        params.trace_format = "simple"
-        params.timestamp_format = "epoch"
-        params.run_time_mode = dr_evt.RunTimeMode.LIMIT
-        params.backfill_policy = dr_evt.BackfillPolicy.EASY
-        params.priority_policy = dr_evt.PriorityPolicy.FCFS
-        self._params = params
-        self._simulation = dr_evt.Simulation(params)
-        self._dr_evt = dr_evt
+        self._simulation = None
         self._last_time_s = 0
+
+    def _started(self):
+        # Training reads only a platform's facts, so dr_evt loads when a market runs.
+        if self._simulation is None:
+            import dr_evt
+
+            self._work_dir.mkdir(parents=True, exist_ok=True)
+            header = self._work_dir / f"{self.name}.csv"
+            header.write_text(
+                "job_submit_time,num_nodes,q_id,time_limit\n", encoding="utf-8"
+            )
+            params = dr_evt.SimParams()
+            params.infile = str(header)
+            params.total_nodes = self.exposed_nodes
+            params.trace_format = "simple"
+            params.timestamp_format = "epoch"
+            params.run_time_mode = dr_evt.RunTimeMode.LIMIT
+            params.backfill_policy = dr_evt.BackfillPolicy.EASY
+            params.priority_policy = dr_evt.PriorityPolicy.FCFS
+            # The simulation reads its parameters by reference: keep them alive.
+            self._params = params
+            self._dr_evt = dr_evt
+            self._simulation = dr_evt.Simulation(params)
+        return self._simulation
 
     def fits(self, job) -> bool:
         """Return whether a job's hardware and node demand fit this platform."""
@@ -87,19 +92,20 @@ class Platform:
             raise ValueError("advance time must be an integer")
         if time_s < self._last_time_s:
             raise ValueError("advance time cannot move backwards")
-        self._simulation.advance_to(time_s)
+        self._started().advance_to(time_s)
         self._last_time_s = time_s
 
     def free_nodes(self) -> int:
         """Return the number of nodes currently available."""
-        return int(self._simulation.get_available_nodes())
+        return int(self._started().get_available_nodes())
 
     def waiting(self) -> int:
         """Return the number of jobs waiting for scheduler placement."""
-        return int(self._simulation.get_active_job_count())
+        return int(self._started().get_active_job_count())
 
     def submit(self, jobs, time_s: int) -> None:
         """Submit jobs at one time, in their given order."""
+        simulation = self._started()
         requests = [
             self._dr_evt.JobAppendRequest(
                 time_s, job.num_nodes, "1", self.run_time(job)
@@ -107,9 +113,9 @@ class Platform:
             for job in jobs
         ]
         if requests:
-            self._simulation.append_jobs(requests)
+            simulation.append_jobs(requests)
 
     def statistics(self) -> dict[str, float]:
         """Return the simulation's completed jobs, utilization and makespan."""
-        statistics = self._simulation.get_statistics()
+        statistics = self._started().get_statistics()
         return {field: float(getattr(statistics, field)) for field in _STATISTIC_FIELDS}

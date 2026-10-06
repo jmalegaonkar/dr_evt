@@ -104,10 +104,10 @@ $$
 its cost plus a share of its surplus or, when it bid under the price, its whole bid.
 `learned.charge` holds this rule for deployment, training and regret alike.
 
-**Training** (`train_regretformer`, or `python -m dr_evt_market train`).
-`record_windows` runs the market under VCG and keeps every window's batch and free
-nodes. Each step draws 8 of those windows and computes a relaxed outcome, in which the
-probabilities stand for the allocation. The loss is
+**Training** (`train_regretformer`, or `python -m dr_evt_market train`). `harvest` runs
+the market on many job streams under several mechanisms and keeps every window's batch
+and free nodes (step 7). Each step draws 8 of those windows and computes a relaxed
+outcome, in which the probabilities stand for the allocation. The loss is
 
 $$
 -\,\text{objective} + \lambda \cdot \text{regret}
@@ -120,13 +120,14 @@ where:
   probabilities, or the welfare with `objective="welfare"`, divided by the window's
   mean cost;
 - regret is the most a job gains by misreporting, over a 9-point item-wise grid of
-  reports for up to four jobs per window;
+  reports for up to four jobs per window, counting only reports at or above each posted
+  price unless `under_price`;
 - overbooked counts the nodes the relaxed allocation uses beyond the free ones, and idle
   the free nodes it leaves idle while a job that fits them waits.
 
 The multiplier $\lambda$ rises while the regret exceeds a budget that shrinks from 1 to
 0.1 percent of the jobs' available surplus, and falls while it is below. The defaults
-are 2,000 steps at a learning rate of 0.001.
+are 2,000 steps at a learning rate of 0.001, on the CPU unless `device` names a GPU.
 
 **Regret** (`mechanism/regret.py`). `grid_regret(mechanism, jobs, platforms, free)`
 measures, for one window and any mechanism, how much each job could gain by misreporting
@@ -224,6 +225,8 @@ These choices are open to revision:
 - **RegretFormer's revenue is the premiums over the posted cost.** A winner under the
   price earns it a negative premium in training, while the market reports revenue as the
   total of the charges.
-- **Regret counts every misreport, including bids under the price.** A mechanism that
-  places every job it can must accept such bids on idle nodes, so holding RegretFormer
-  to a regret budget that counts them pushes it, in training, to keep jobs waiting.
+- **Training's regret leaves out bids under the price.** A mechanism that places every
+  job it can must accept such bids on idle nodes, so shading under the price pays under
+  every mechanism, and a regret budget that counts it pushes RegretFormer, in training,
+  to keep jobs waiting. `grid_regret` and `refined_regret` count every report by
+  default; `under_price=False` measures what training holds the network to.

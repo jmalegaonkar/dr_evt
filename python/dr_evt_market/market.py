@@ -10,33 +10,11 @@
 import csv
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from .mechanism import Decision, Mechanism, candidates
 from .mechanism.base import TOLERANCE, job_value
-
-_ROUTED_FIELDS = (
-    "job_id",
-    "platform",
-    "window",
-    "window_s",
-    "cost",
-    "value",
-    "premium",
-    "charge",
-    "submit_s",
-    "begin_s",
-    "end_s",
-)
-_WAITING_FIELDS = ("job_id", "reason", "submit_s")
-_SERVICE_FIELDS = (
-    "community",
-    "count",
-    "mean_wait_s",
-    "node_hour_weighted_mean_wait_s",
-    "mean_bounded_slowdown",
-)
 
 
 @dataclass(frozen=True)
@@ -46,7 +24,6 @@ class RoutedJob:
     job_id: str
     platform: str
     window: int
-    window_s: int
     cost: float
     value: float
     premium: float
@@ -181,6 +158,9 @@ def run(
     arrival = 0
     t = 0
     while arrival < len(arrivals) or queue:
+        if not queue:
+            # Nothing waits, so nothing changes before the next arrival's window.
+            t = max(t, -(-arrivals[arrival].submit_s // window_s) * window_s)
         for platform in platforms.values():
             platform.advance_to(t)
         while arrival < len(arrivals) and arrivals[arrival].submit_s <= t:
@@ -217,7 +197,6 @@ def run(
                     job.job_id,
                     decision.platform,
                     t // window_s,
-                    t,
                     cost,
                     value,
                     decision.charge - cost,
@@ -245,9 +224,10 @@ def run(
     )
 
 
-def _write_csv(path, fields, rows):
+def _write_csv(path, kind, rows):
+    names = [field.name for field in fields(kind)]
     with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields, lineterminator="\n")
+        writer = csv.DictWriter(stream, fieldnames=names, lineterminator="\n")
         writer.writeheader()
         writer.writerows(asdict(row) for row in rows)
 
@@ -291,15 +271,19 @@ def write_outputs(result: Result, out_dir) -> dict[str, str]:
     waiting_path = root / "waiting.csv"
     service_path = root / "service.csv"
     summary_path = root / "summary.json"
-    _write_csv(routed_path, _ROUTED_FIELDS, result.routed)
-    _write_csv(waiting_path, _WAITING_FIELDS, result.waiting)
+    _write_csv(routed_path, RoutedJob, result.routed)
+    _write_csv(waiting_path, Waiting, result.waiting)
     service = _service(result)
-    _write_csv(service_path, _SERVICE_FIELDS, service)
+    _write_csv(service_path, _Service, service)
     digest = hashlib.sha256(routed_path.read_bytes()).hexdigest()
     summary = {
         "configuration": result.configuration,
         "service": {
-            row.community: {field: getattr(row, field) for field in _SERVICE_FIELDS[1:]}
+            row.community: {
+                name: value
+                for name, value in asdict(row).items()
+                if name != "community"
+            }
             for row in service
         },
         "statistics": result.statistics,

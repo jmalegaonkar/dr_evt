@@ -38,6 +38,10 @@ class Window:
         tensors = (getattr(self, field.name) for field in fields(self))
         return Window(*(tensor.expand(count, *tensor.shape[1:]) for tensor in tensors))
 
+    def to(self, device) -> "Window":
+        """Return the windows on a device."""
+        return Window(*(getattr(self, field.name).to(device) for field in fields(self)))
+
     def take(self, index) -> "Window":
         """Return the windows at the given batch positions."""
         index = torch.as_tensor(index)

@@ -123,7 +123,9 @@ class Vcg(Mechanism):
             _, without = _solve(
                 jobs, platforms, free_nodes, self.time_limit_s, job_index
             )
-            pivot = max(without - (welfare - variable.net), 0.0)
+            pivot = without - (welfare - variable.net)
+            if pivot < TOLERANCE:
+                pivot = 0.0
             charge = min(variable.value, variable.cost + pivot)
             decisions.append(Decision(job.job_id, variable.platform, charge))
         return decisions
