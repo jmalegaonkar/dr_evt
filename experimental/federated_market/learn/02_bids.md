@@ -36,11 +36,12 @@ bid under the price, when it pays its whole bid.
   the price when its value there covers its cost: `bid >= posted price(p) / speed(p)`
   for a single bid, and `bid(p) >= posted price(p)` for a multi bid.
 
-Every window auctions the first 32 queued jobs that have a candidate, so who takes part
-depends only on public facts. A job can win only among its offers. A bid that covers
-the price pays between the cost and the value; a bid under the price can win too, and
-then pays in full. VCG and pay what you bid serve the bids that cover the price first,
-so a bid under it wins only the nodes those leave.
+Every window auctions the first 32 queued jobs that have a candidate, and later jobs win
+only the nodes left over (step 5), so a high bid cannot buy its way into a window that
+is already full. A job can win only among its offers. A bid that covers the price pays
+between the cost and the value; a bid under the price can win too, and then pays in
+full. VCG and pay what you bid serve the bids that cover the price first, so a bid under
+it wins only the nodes those leave.
 
 ## 2.3 Personas
 

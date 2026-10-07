@@ -5,10 +5,11 @@ dr_evt simulates each machine's exposed share, and a central market decides, eve
 window, where each waiting job runs and what it pays.
 
 ```text
-LC traces --prepare--> jobs.csv --run--> every 60 s: admit arrivals
-(clean, synthesize                       -> take up to 32 jobs that can be placed now
+LC traces --prepare--> jobs.csv --run--> every 30 s: admit arrivals
+(clean, synthesize                       -> take the first 32 jobs that can start now
  bids and hardware)                      -> the mechanism picks platforms and charges
                                          -> the market checks the decisions
+                                         -> nodes still free: auction the next 32
                                          -> winners start now on dr_evt
                                          -> outputs, with service by community
 ```
@@ -138,10 +139,11 @@ Code: `market.py` (`run`, `_check_decisions`, `_blocked_by`). Details: `05_loop.
    auction, with its reason: no platform has its `hardware`, it is `oversize` for every
    share, or it bid on no platform that fits it (`no_bid`). It ends the run in
    `waiting.csv`.
-2. **Each window,** at `t = 0, 60, 120, ...`: advance every platform to `t`, admit the
+2. **Each window,** at `t = 0, 30, 60, ...`: advance every platform to `t`, admit the
    jobs that have arrived, read the free nodes, and form the batch: the first 32 queued
    jobs that can be placed now, whatever they bid. The others keep their place in the
-   queue.
+   queue. When the winners leave free nodes that a later job bid on, the next 32 jobs
+   that fit them are auctioned for those nodes, up to the first 256 queued jobs.
 3. **Decision.** The mechanism decides, and the market checks that every job is decided
    once, belongs to the batch and gets a platform it has an offer on; that its charge
    is at most the mechanism's cap and at least its cost, or the cap when that is less;

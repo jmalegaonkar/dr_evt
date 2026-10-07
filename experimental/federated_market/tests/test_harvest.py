@@ -13,6 +13,7 @@ from pathlib import Path
 
 from federated_market import (
     FirstFit,
+    Job,
     Vcg,
     federation,
     harvest,
@@ -36,7 +37,7 @@ class RecordWindowsTests(unittest.TestCase):
             platforms = federation(Path(directory) / "recorded", share=0.1)
             windows = record_windows(jobs, platforms)
             result = run(jobs, federation(Path(directory) / "run", share=0.1), Vcg())
-        self.assertEqual(len(windows), 6)
+        self.assertEqual(len(windows), 10)
         self.assertEqual(
             [job.job_id for job in windows[0][0]],
             ["j000001", "j000002", "j000003", "j000004", "j000005"],
@@ -46,6 +47,16 @@ class RecordWindowsTests(unittest.TestCase):
         )
         batched = {job.job_id for batch, _ in windows for job in batch}
         self.assertEqual(batched, {row.job_id for row in result.routed})
+
+    def test_each_auction_is_recorded(self) -> None:
+        """Every auction is recorded, refills on the nodes left free included."""
+        jobs = [Job(f"a{i}", 0, 1, 600, 2.0, {"gpu"}) for i in range(6)]
+        jobs += [Job(f"b{i}", 60, 1, 600, 2.0, {"gpu"}) for i in range(3)]
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share=0.1, names=("corona",))
+            windows = record_windows(jobs, platforms, prefix=2)
+        self.assertEqual([len(batch) for batch, _ in windows], [2, 2, 2, 2, 1])
+        self.assertEqual([free["corona"] for _, free in windows], [12, 10, 8, 6, 4])
 
 
 class HarvestTests(unittest.TestCase):

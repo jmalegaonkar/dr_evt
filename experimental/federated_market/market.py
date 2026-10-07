@@ -102,11 +102,35 @@ def _check_decisions(
     return [checked[job.job_id] for job in batch if job.job_id in checked]
 
 
-def _configuration(platforms, mechanism, window_s, prefix):
+def _auction(able, platforms, free_nodes, mechanism, prefix, max_prefix):
+    """Auction the first jobs that can be placed, then refill the nodes left free.
+
+    The first auction takes the first `prefix` jobs. While the auctions leave free
+    nodes that a later job, among the first `max_prefix`, bid on, the next `prefix`
+    jobs that fit those nodes are auctioned for them. Earlier winners keep theirs.
+    """
+    winners = []
+    left = dict(free_nodes)
+    batch, later = able[:prefix], able[prefix:max_prefix]
+    while True:
+        decisions = list(mechanism.decide(batch, platforms, dict(left)))
+        placed = _check_decisions(batch, platforms, left, mechanism, decisions)
+        winners += placed
+        for job, decision, _, _ in placed:
+            left[decision.platform] -= job.num_nodes
+        if not any(mechanism.offers(job, platforms, left) for job in later):
+            return winners
+        batch = [job for job in later if candidates(job, platforms, left)][:prefix]
+        taken = {job.job_id for job in batch}
+        later = [job for job in later if job.job_id not in taken]
+
+
+def _configuration(platforms, mechanism, window_s, prefix, max_prefix):
     return {
         "mechanism": mechanism.name,
         "window_s": window_s,
         "prefix": prefix,
+        "max_prefix": max_prefix,
         "platforms": {
             name: {
                 "total_nodes": platform.total_nodes,
@@ -131,13 +155,24 @@ def _blocked_by(job, platforms, full_nodes, mechanism):
 
 
 def run(
-    jobs, platforms, mechanism: Mechanism, *, window_s: int = 60, prefix: int = 32
+    jobs,
+    platforms,
+    mechanism: Mechanism,
+    *,
+    window_s: int = 30,
+    prefix: int = 32,
+    max_prefix: int = 256,
 ) -> Result:
     """Route an arrival stream through fixed market windows."""
-    if isinstance(window_s, bool) or not isinstance(window_s, int) or window_s <= 0:
-        raise ValueError("window_s must be a positive integer")
-    if isinstance(prefix, bool) or not isinstance(prefix, int) or prefix <= 0:
-        raise ValueError("prefix must be a positive integer")
+    for name, value in (
+        ("window_s", window_s),
+        ("prefix", prefix),
+        ("max_prefix", max_prefix),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if max_prefix < prefix:
+        raise ValueError("max_prefix must be at least prefix")
 
     # The sort is stable, so jobs submitted together keep their input order.
     ordered = sorted(jobs, key=lambda job: job.submit_s)
@@ -168,16 +203,10 @@ def run(
             arrival += 1
 
         free = {name: platform.free_nodes() for name, platform in platforms.items()}
-        # Who takes part depends only on public facts: a job that can be placed now
-        # is auctioned, whatever it bids.
-        batch = []
-        for job in queue:
-            if candidates(job, platforms, free):
-                batch.append(job)
-                if len(batch) == prefix:
-                    break
-        decisions = list(mechanism.decide(batch, platforms, free))
-        winners = _check_decisions(batch, platforms, free, mechanism, decisions)
+        # The window opens on public facts: the first jobs that can be placed now,
+        # whatever they bid. Later jobs get only the nodes its auctions leave free.
+        able = [job for job in queue if candidates(job, platforms, free)]
+        winners = _auction(able, platforms, free, mechanism, prefix, max_prefix)
         grouped = {name: [] for name in platforms}
         for job, decision, _, _ in winners:
             grouped[decision.platform].append(job)
@@ -206,7 +235,7 @@ def run(
                     t + platforms[decision.platform].run_time(job),
                 )
             )
-        winner_ids = {decision.job_id for decision in decisions}
+        winner_ids = {decision.job_id for _, decision, _, _ in winners}
         queue = [job for job in queue if job.job_id not in winner_ids]
         t += window_s
 
@@ -219,7 +248,7 @@ def run(
         routed,
         waiting,
         statistics,
-        _configuration(platforms, mechanism, window_s, prefix),
+        _configuration(platforms, mechanism, window_s, prefix, max_prefix),
         {job.job_id: (job.source, job.num_nodes) for job in ordered},
     )
 

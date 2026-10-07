@@ -48,7 +48,8 @@ def _parser():
     run_parser.add_argument("--out", required=True, type=Path)
     run_parser.add_argument("--share", type=_share, default=1.0)
     run_parser.add_argument("--prefix", type=int, default=32)
-    run_parser.add_argument("--window", type=int, default=60)
+    run_parser.add_argument("--max-prefix", type=int, default=256)
+    run_parser.add_argument("--window", type=int, default=30)
     run_parser.add_argument("--mechanism", choices=MECHANISMS, default="vcg")
     run_parser.add_argument("--checkpoint", type=Path)
     run_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
@@ -60,7 +61,8 @@ def _parser():
     harvest_parser.add_argument("--checkpoint", type=Path)
     harvest_parser.add_argument("--share", type=_share, default=1.0)
     harvest_parser.add_argument("--prefix", type=int, default=32)
-    harvest_parser.add_argument("--window", type=int, default=60)
+    harvest_parser.add_argument("--max-prefix", type=int, default=256)
+    harvest_parser.add_argument("--window", type=int, default=30)
     harvest_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
 
     train_parser = commands.add_parser("train", help="train RegretFormer")
@@ -72,6 +74,7 @@ def _parser():
     train_parser.add_argument("--steps", type=int, default=2000)
     train_parser.add_argument("--seed", type=int, default=0)
     train_parser.add_argument("--under-price", action="store_true")
+    train_parser.add_argument("--balance", action="store_true")
     train_parser.add_argument("--device", default="cpu")
 
     prepare_parser = commands.add_parser("prepare", help="prepare trace jobs")
@@ -115,6 +118,7 @@ def _run(args):
             mechanism,
             window_s=args.window,
             prefix=args.prefix,
+            max_prefix=args.max_prefix,
         )
     paths = write_outputs(result, args.out)
     windows = max((row.window for row in result.routed), default=-1) + 1
@@ -138,6 +142,7 @@ def _harvest(args):
         names=_names(args.platforms),
         window_s=args.window,
         prefix=args.prefix,
+        max_prefix=args.max_prefix,
     )
     with tempfile.TemporaryDirectory() as directory:
         platforms = federation(directory, args.share, names=_names(args.platforms))
@@ -149,7 +154,7 @@ def _harvest(args):
         )
     sizes = [len(window["jobs"]) for window in windows]
     print(f"one_job={sizes.count(1)}")
-    print(f"full_batch={sizes.count(args.prefix)}")
+    print(f"largest={max(sizes, default=0)}")
 
 
 def _train(args):
@@ -162,6 +167,7 @@ def _train(args):
             steps=args.steps,
             seed=args.seed,
             under_price=args.under_price,
+            balance=args.balance,
             device=args.device,
         )
     mechanism.save(
@@ -171,6 +177,7 @@ def _train(args):
         windows=len(windows),
         files=[str(path) for path in args.windows],
         under_price=args.under_price,
+        balance=args.balance,
     )
     print(f"windows={len(windows)}")
     for key in ("objective", "regret", "multiplier"):

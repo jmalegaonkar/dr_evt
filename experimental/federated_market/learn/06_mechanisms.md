@@ -107,7 +107,11 @@ its cost plus a share of its surplus or, when it bid under the price, its whole 
 **Training** (`train_regretformer`, or `python -m federated_market train`). `harvest` runs
 the market on many job streams under several mechanisms and keeps every window's batch
 and free nodes (step 7). Each step draws 8 of those windows and computes a relaxed
-outcome, in which the probabilities stand for the allocation. The loss is
+outcome, in which the probabilities stand for the allocation. Most windows hold one job,
+so with `balance` (`train --balance`) a step first picks a length at random, one job,
+2 to 4, 5 to 16, or 17 and more, and draws all 8 windows of that length: longer windows,
+where jobs compete, count as much as the rest, and a step's windows pad to similar
+sizes. The loss is
 
 $$
 -\,\text{objective} + \lambda \cdot \text{regret}

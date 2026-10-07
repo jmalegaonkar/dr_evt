@@ -12,6 +12,19 @@ import math
 from .regret import _misreports
 
 _CHUNK = 2048
+# Balanced training draws each step from one bucket of windows; a bucket holds the
+# windows with at least this many jobs and fewer than the next bucket's.
+_LENGTHS = (1, 2, 5, 17)
+
+
+def _length_pools(windows):
+    """Return the indices of the windows in each nonempty length bucket."""
+    import numpy as np
+
+    lengths = np.array([len(jobs) for jobs, _ in windows])
+    bucket = np.searchsorted(_LENGTHS, lengths, side="right") - 1
+    pools = [np.flatnonzero(bucket == index) for index in range(len(_LENGTHS))]
+    return [pool for pool in pools if len(pool)]
 
 
 def train_regretformer(
@@ -30,6 +43,7 @@ def train_regretformer(
     capacity=10.0,
     seed=0,
     under_price=False,
+    balance=False,
     device="cpu",
     **shape,
 ):
@@ -37,12 +51,13 @@ def train_regretformer(
 
     The loss is minus the objective (the premiums over cost, or welfare), plus a
     multiplier times the regret, plus a `capacity`-weighted penalty on overbooked and
-    idle nodes. The multiplier follows RegretFormer's rule against a budget that
-    shrinks from `budget[0]` to `budget[1]` of the jobs' available surplus. Regret
-    comes from grid misreports for up to `regret_jobs` jobs per window, and counts
-    reports under a posted price only with `under_price`. Returns the mechanism, back
-    on the CPU, and each step's history, whose regret is the relaxed network's: judge
-    the deployed mechanism with `refined_regret`.
+    idle nodes. The multiplier follows RegretFormer's rule against a budget that shrinks
+    from `budget[0]` to `budget[1]` of the jobs' available surplus. Regret comes from
+    grid misreports for up to `regret_jobs` jobs per window, and counts reports under a
+    posted price only with `under_price`. With `balance`, each step draws its windows
+    from one length bucket, chosen at random: one job, 2 to 4, 5 to 16, or 17 and more.
+    Returns the mechanism, back on the CPU, and each step's history, whose regret is the
+    relaxed network's: judge the deployed mechanism with `refined_regret`.
     """
     import numpy as np
     import torch
@@ -116,6 +131,7 @@ def train_regretformer(
         return (torch.relu(gain) * spread / scale[at]).sum() / len(truth)
 
     rng = np.random.default_rng(seed)
+    pools = _length_pools(windows) if balance else None
     mechanism = RegretFormer(seed=seed, **shape)
     net = mechanism.net.to(device).train()
     optimizer = torch.optim.Adam(net.parameters(), lr=rate)
@@ -124,7 +140,13 @@ def train_regretformer(
     keys = ("objective", "regret", "multiplier", "overbooked", "idle")
     history = {key: [] for key in keys}
     for _ in range(steps):
-        chosen = rng.choice(len(windows), size=min(batch, len(windows)), replace=False)
+        if pools:
+            pool = pools[rng.integers(len(pools))]
+            chosen = rng.choice(pool, size=min(batch, len(pool)), replace=False)
+        else:
+            chosen = rng.choice(
+                len(windows), size=min(batch, len(windows)), replace=False
+            )
         window = learned.window([windows[index] for index in chosen], platforms)
         window = window.to(device)
         truth, scale = window.prices, window.scale()

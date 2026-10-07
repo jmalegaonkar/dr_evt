@@ -39,14 +39,23 @@ class _Recorder(Mechanism):
         return self.inner.decide(jobs, platforms, free_nodes)
 
 
-def record_windows(jobs, platforms, *, mechanism=None, window_s=60, prefix=32):
-    """Run the market and return every window's batch and free nodes.
+def record_windows(
+    jobs, platforms, *, mechanism=None, window_s=30, prefix=32, max_prefix=256
+):
+    """Run the market and return every auction's batch and free nodes, refills included.
 
     The queue, and so every window, follows the mechanism that decides: VCG unless
     another is given.
     """
     recorder = _Recorder(Vcg() if mechanism is None else mechanism)
-    run(jobs, platforms, recorder, window_s=window_s, prefix=prefix)
+    run(
+        jobs,
+        platforms,
+        recorder,
+        window_s=window_s,
+        prefix=prefix,
+        max_prefix=max_prefix,
+    )
     return recorder.windows
 
 
@@ -69,8 +78,9 @@ def harvest(
     *,
     share=1.0,
     names=DEFAULT_FEDERATION,
-    window_s=60,
+    window_s=30,
     prefix=32,
+    max_prefix=256,
 ):
     """Run every stream under every mechanism and return the windows they auction.
 
@@ -84,7 +94,12 @@ def harvest(
             with tempfile.TemporaryDirectory() as directory:
                 platforms = federation(directory, share, names=names)
                 recorded = record_windows(
-                    jobs, platforms, mechanism=make(), window_s=window_s, prefix=prefix
+                    jobs,
+                    platforms,
+                    mechanism=make(),
+                    window_s=window_s,
+                    prefix=prefix,
+                    max_prefix=max_prefix,
                 )
             windows += [
                 {"stream": stream, "mechanism": label, "free": free, "jobs": batch}

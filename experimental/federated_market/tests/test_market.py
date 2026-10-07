@@ -68,10 +68,10 @@ class _Decline(Mechanism):
 class MarketTests(unittest.TestCase):
     """Exercise routing, output stability, prefixes and guarantees."""
 
-    def _fixture(self, root: Path, *, prefix: int = 32):
+    def _fixture(self, root: Path, *, prefix: int = 32, max_prefix: int = 256):
         jobs = read_jobs(_DATA / "jobs.csv")
         platforms = federation(root / "platforms", share=0.1)
-        result = run(jobs, platforms, Vcg(), window_s=60, prefix=prefix)
+        result = run(jobs, platforms, Vcg(), prefix=prefix, max_prefix=max_prefix)
         return jobs, result
 
     def test_command_line_parses_a_share_per_platform(self) -> None:
@@ -126,7 +126,7 @@ class MarketTests(unittest.TestCase):
             {"corona", "dane", "matrix", "tioga", "tuolumne"},
         )
         for row in result.routed:
-            self.assertEqual(row.begin_s, row.window * 60)
+            self.assertEqual(row.begin_s, row.window * result.configuration["window_s"])
             job = by_id[row.job_id]
             hardware = "gpu" if "gpu" in job.requires else "cpu"
             speed = result.configuration["platforms"][row.platform]["speed"][hardware]
@@ -148,7 +148,7 @@ class MarketTests(unittest.TestCase):
         # This changes only when the fixture or the model changes.
         self.assertEqual(
             outputs["sha256"],
-            "960f2328047bb667fe055682833afaaab500fd2e8a8249d3ad0af68575ac0344",
+            "b15ef37b85a5b63f8718e5b1b21ed9ff26345ea1a284bb1f480ede606562de49",
         )
 
     def test_routed_output_is_byte_identical(self) -> None:
@@ -213,12 +213,56 @@ class MarketTests(unittest.TestCase):
         self.assertAlmostEqual(summary["service"][""]["mean_bounded_slowdown"], 5.8)
 
     def test_prefix_two_limits_each_window(self) -> None:
-        """A prefix of two drains the stream with at most two winners per window."""
+        """A window fixed at two drains the stream with at most two winners each."""
         with tempfile.TemporaryDirectory() as directory:
-            _, result = self._fixture(Path(directory), prefix=2)
+            _, result = self._fixture(Path(directory), prefix=2, max_prefix=2)
         per_window = collections.Counter(row.window for row in result.routed)
         self.assertEqual(len(result.routed), 19)
         self.assertTrue(all(count <= 2 for count in per_window.values()))
+
+    def test_a_burst_fills_free_nodes_in_one_window(self) -> None:
+        """A burst past the prefix fills free nodes in one window, two jobs an auction."""
+        decided = []
+
+        class _Counting(Vcg):
+            def decide(self, jobs, platforms, free_nodes):
+                decided.append(len(jobs))
+                return super().decide(jobs, platforms, free_nodes)
+
+        jobs = [Job(f"a{i}", 0, 1, 600, 2.0, {"gpu"}) for i in range(6)]
+        jobs += [Job(f"b{i}", 60, 1, 600, 2.0, {"gpu"}) for i in range(3)]
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share=0.1, names=("corona",))
+            result = run(jobs, platforms, _Counting(), prefix=2)
+        # Twelve free nodes: the first window auctions the burst two at a time on the
+        # nodes left, and the second starts over with the three that arrived.
+        self.assertEqual(decided, [2, 2, 2, 2, 1])
+        self.assertEqual(
+            {row.job_id: row.begin_s for row in result.routed},
+            {job.job_id: job.submit_s for job in jobs},
+        )
+
+    def test_a_filled_window_takes_no_later_job(self) -> None:
+        """When a window's winners fill the free nodes, a higher bid behind it waits."""
+        jobs = [
+            Job("first", 0, 6, 600, 2.0, {"gpu"}),
+            Job("second", 0, 6, 600, 2.0, {"gpu"}),
+            Job("rich", 0, 6, 600, 9.0, {"gpu"}),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share=0.1, names=("corona",))
+            result = run(jobs, platforms, Vcg(), prefix=2)
+        self.assertEqual(
+            {row.job_id: row.begin_s for row in result.routed},
+            {"first": 0, "second": 0, "rich": 600},
+        )
+
+    def test_a_cap_below_the_prefix_raises(self) -> None:
+        """The window cannot be capped below the size it opens at."""
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share=0.1, names=("corona",))
+            with self.assertRaisesRegex(ValueError, "max_prefix"):
+                run([], platforms, Vcg(), prefix=4, max_prefix=2)
 
     def test_an_idle_stretch_is_skipped(self) -> None:
         """With nothing queued, the loop goes straight to the next arrival's window."""
@@ -250,7 +294,7 @@ class MarketTests(unittest.TestCase):
             platforms = federation(
                 Path(directory) / "platforms", share=0.1, names=("corona",)
             )
-            result = run(jobs, platforms, Vcg(), window_s=60, prefix=1)
+            result = run(jobs, platforms, Vcg(), window_s=60, prefix=1, max_prefix=1)
         self.assertEqual(
             {row.job_id: row.begin_s for row in result.routed},
             {"running": 0, "wide": 120, "narrow": 60},
@@ -267,7 +311,7 @@ class MarketTests(unittest.TestCase):
             platforms = federation(
                 Path(directory), share=0.1, names=("corona", "tuolumne")
             )
-            result = run(jobs, platforms, Vcg(), window_s=60, prefix=1)
+            result = run(jobs, platforms, Vcg(), window_s=60, prefix=1, max_prefix=1)
         # At 60 s only Corona has room: poor takes the one place in the batch, though
         # rich behind it bids more, and wins Corona under its price, paying its bid.
         self.assertEqual(
@@ -386,7 +430,7 @@ class MarketTests(unittest.TestCase):
                 text=True,
                 env=environment,
             )
-            self.assertIn("windows=6", completed.stdout.splitlines())
+            self.assertIn("windows=11", completed.stdout.splitlines())
             self.assertIn("routed=19", completed.stdout.splitlines())
             self.assertIn("waiting=1", completed.stdout.splitlines())
             self.assertEqual(
@@ -395,7 +439,7 @@ class MarketTests(unittest.TestCase):
             )
             self.assertIn(
                 "routed_sha256="
-                "960f2328047bb667fe055682833afaaab500fd2e8a8249d3ad0af68575ac0344",
+                "b15ef37b85a5b63f8718e5b1b21ed9ff26345ea1a284bb1f480ede606562de49",
                 completed.stdout.splitlines(),
             )
             first_price = subprocess.run(

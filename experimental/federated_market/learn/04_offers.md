@@ -122,7 +122,7 @@ on every machine: every winner started at t = 0. `free_nodes()` now reads 12 on
 Tuolumne and 4 on Dane.
 
 **What happens to j000004.** It keeps its place in the queue. Tuolumne's nodes come
-back when j000001 ends at 129 s, so j000004 wins Tuolumne in the window at 180 s.
+back when j000001 ends at 129 s, so j000004 wins Tuolumne in the window at 150 s.
 
 ## 4.5 The same window under the other mechanisms
 

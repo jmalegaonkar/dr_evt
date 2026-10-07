@@ -48,12 +48,12 @@ Seven of the fixture's nineteen rows, under VCG at share 0.1:
 | j000002 | dane | 0 | 0.6969 | 0.9333 | 0.0930 | 0.7898 | 0 | 0 | 175 |
 | j000003 | dane | 0 | 0.2236 | 0.2781 | 0 | 0.2236 | 0 | 0 | 64 |
 | j000005 | tuolumne | 0 | 0.0024 | 0.0079 | 0 | 0.0024 | 0 | 0 | 16 |
-| j000010 | corona | 2 | 0.0500 | 0.5000 | 0 | 0.0500 | 90 | 120 | 160 |
-| j000004 | tuolumne | 3 | 0.3154 | 0.8301 | 0 | 0.3154 | 0 | 180 | 235 |
-| j000015 | corona | 3 | 0.0833 | 0.0778 | -0.0056 | 0.0778 | 180 | 180 | 230 |
+| j000010 | corona | 3 | 0.0500 | 0.5000 | 0 | 0.0500 | 90 | 90 | 130 |
+| j000004 | tuolumne | 5 | 0.3154 | 0.8301 | 0 | 0.3154 | 0 | 150 | 205 |
+| j000015 | corona | 6 | 0.0833 | 0.0778 | -0.0056 | 0.0778 | 180 | 180 | 230 |
 
-j000001 and j000002 pay pivots (step 4). j000004 waits from 0 to 180 for Tuolumne's
-nodes, and j000010 waits for the window after its arrival at 90. j000015 bid under
+j000001 and j000002 pay pivots (step 4). j000004 waits from 0 to 150 for Tuolumne's
+nodes; every other job arrives on a window and starts at once. j000015 bid under
 Corona's price and pays its whole bid. The file holds full precision; this table rounds.
 
 ## 7.3 Jobs set aside, `waiting.csv`
@@ -90,21 +90,21 @@ the communities. Jobs set aside never enter these measures. The fixture's:
 
 | community | count | mean wait (s) | node-hour weighted mean wait (s) | mean bounded slowdown |
 |---|---:|---:|---:|---:|
-| corona | 4 | 7.5 | 0.79 | 1.23 |
+| corona | 4 | 0.0 | 0.00 | 1.00 |
 | dane | 4 | 0.0 | 0.00 | 1.00 |
-| matrix | 4 | 7.5 | 1.35 | 1.10 |
-| tioga | 3 | 70.0 | 175.83 | 2.86 |
-| tuolumne | 4 | 7.5 | 7.86 | 1.19 |
-| all | 19 | 15.8 | 25.99 | 1.40 |
+| matrix | 4 | 0.0 | 0.00 | 1.00 |
+| tioga | 3 | 50.0 | 146.37 | 1.91 |
+| tuolumne | 4 | 0.0 | 0.00 | 1.00 |
+| all | 19 | 7.9 | 21.18 | 1.14 |
 
 The communities are the fixture's sources, not where the jobs ran: Tioga's three jobs
-all ran on Tuolumne, and j000004, which waited 180 s, holds 1.68 of their 1.72
+all ran on Tuolumne, and j000004, which waited 150 s, holds 1.68 of their 1.72
 node-hours.
 
 ## 7.5 The summary, `summary.json`
 
-- `configuration`: the mechanism's name, `window_s`, `prefix`, and for each platform its
-  total and exposed nodes, posted price, hardware and speeds.
+- `configuration`: the mechanism's name, `window_s`, `prefix`, `max_prefix`, and for
+  each platform its total and exposed nodes, posted price, hardware and speeds.
 - `service`: the rows of `service.csv`, keyed by community.
 - `statistics`: what each platform's dr_evt simulation measured. `jobs_completed`;
   `makespan`, the platform's latest completion time, counted from 0; and `utilization`,
@@ -155,8 +155,9 @@ ledger's digest.
 |---|---|---|
 | `--jobs`, `--out` | required | the jobs file and the output directory |
 | `--share` | 1.0 | one share, or `name=share,...` with 1.0 for the others |
-| `--prefix` | 32 | jobs auctioned per window |
-| `--window` | 60 | the window length in seconds |
+| `--prefix` | 32 | jobs per auction |
+| `--max-prefix` | 256 | the most queued jobs a window auctions |
+| `--window` | 30 | the window length in seconds |
 | `--mechanism` | `vcg` | `vcg`, `firstprice`, `firstfit` or `regretformer` |
 | `--checkpoint` | none | the saved network, required for `regretformer` |
 | `--platforms` | all five | the federation |
@@ -164,26 +165,28 @@ ledger's digest.
 On the fixture, `run --jobs tests/data/jobs.csv --out results --share 0.1` prints
 
 ```text
-windows=6
+windows=11
 routed=19
 waiting=1
-routed_sha256=960f2328047bb667fe055682833afaaab500fd2e8a8249d3ad0af68575ac0344
+routed_sha256=b15ef37b85a5b63f8718e5b1b21ed9ff26345ea1a284bb1f480ede606562de49
 ```
 
 **`harvest`** runs each `--jobs` file under each `--mechanism` (repeatable; `vcg` when
 none is given, and `regretformer` with `--checkpoint`), every run from idle platforms,
 and writes every window with jobs queued to `--out`: a gzipped JSON lines file whose
 first line holds the federation's facts and each further line one window, with its jobs
-file, mechanism, free nodes and batch. It takes `--share`, `--prefix`, `--window` and
-`--platforms` as `run` does, and prints the windows in all, per mechanism, with one job
-and with a full batch.
+file, mechanism, free nodes and batch, auctions that refill a window's leftover nodes
+included. It takes `--share`, `--prefix`, `--max-prefix`, `--window` and `--platforms`
+as `run` does, and prints the windows in all, per mechanism, with one job, and the
+largest batch (`largest`).
 
 **`train`** reads one or more `--windows` files from one federation, trains RegretFormer
 on them (step 6) and saves the network to `--out`. Its options are `--objective`
 (`revenue` or `welfare`), `--steps` (2000), `--seed` (0), `--under-price` to count
-misreports under the price in the regret, and `--device` (`cpu`, or a GPU such as
-`cuda`). It needs torch but not dr_evt, and prints the windows read and the mean
-objective, regret and multiplier over the last 100 steps.
+misreports under the price in the regret, `--balance` to draw each step's windows from
+one length (step 6), and `--device` (`cpu`, or a GPU such as `cuda`). It needs torch but
+not dr_evt, and prints the windows read and the mean objective, regret and multiplier
+over the last 100 steps.
 
 ## 7.8 Modelling choices
 

@@ -41,6 +41,21 @@ def _command(*arguments):
     )
 
 
+class LengthPoolTests(unittest.TestCase):
+    """Group windows into the length buckets balanced training draws from."""
+
+    def test_windows_fall_into_length_buckets(self) -> None:
+        """Buckets hold 1, 2 to 4, 5 to 16 and 17 or more jobs; empty ones drop."""
+        from federated_market.mechanism.training import _length_pools
+
+        windows = [([None] * size, {}) for size in (1, 3, 4, 20, 7, 1)]
+        pools = [list(pool) for pool in _length_pools(windows)]
+        self.assertEqual(pools, [[0, 5], [1, 2], [4], [3]])
+        self.assertEqual(
+            [list(pool) for pool in _length_pools(windows[:3])], [[0], [1, 2]]
+        )
+
+
 @unittest.skipUnless(_TORCH, "RegretFormer needs torch")
 class TrainingTests(unittest.TestCase):
     """Train briefly and deploy the result."""
@@ -66,6 +81,20 @@ class TrainingTests(unittest.TestCase):
             self.assertTrue(torch.equal(tensor, weights[name]), name)
         self.assertEqual(len(result.routed) + len(result.waiting), len(jobs))
 
+    def test_balanced_training_deploys(self) -> None:
+        """Training that draws each step from one length bucket still deploys."""
+        jobs = read_jobs(_DATA / "jobs.csv")
+        options = {"steps": 3, "batch": 2, "regret_jobs": 2, "points": 5, "seed": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory) / "recorded", share=0.1)
+            windows = record_windows(jobs, platforms)
+            trained, history = train_regretformer(
+                windows, platforms, balance=True, **options
+            )
+            result = run(jobs, federation(Path(directory) / "run", share=0.1), trained)
+        self.assertTrue(all(len(values) == 3 for values in history.values()))
+        self.assertEqual(len(result.routed) + len(result.waiting), len(jobs))
+
     def test_command_line_trains_a_network_that_runs(self) -> None:
         """Harvested windows train a checkpoint that the run command uses."""
         with tempfile.TemporaryDirectory() as directory:
@@ -87,7 +116,7 @@ class TrainingTests(unittest.TestCase):
                 "firstfit",
             )
             self.assertEqual(harvested.returncode, 0, harvested.stderr)
-            self.assertIn("windows:vcg=6", harvested.stdout.splitlines())
+            self.assertIn("windows:vcg=10", harvested.stdout.splitlines())
             trained = _command(
                 "train", "--windows", windows, "--out", network, "--steps", "2"
             )

@@ -2,7 +2,7 @@
 
 A market that routes HPC jobs across a federation of LLNL machines, built on dr_evt.
 Each machine shows the federation a share of its nodes, simulated by its own dr_evt
-instance. Every 60 seconds the market auctions the jobs waiting in its queue, starts the
+instance. Every 30 seconds the market auctions the jobs waiting in its queue, starts the
 winners on the machines they won, and records what each paid and how long it waited.
 The jobs come from real LC traces; the traces carry no bids, so a persona rule draws
 them.
