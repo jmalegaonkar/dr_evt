@@ -53,6 +53,17 @@ def _misreports(prices, posted, points, span, under_price=True):
     factors = [span * step / (points - 1) for step in range(points)]
     factors += [cutoff / price for cutoff, price in zip(posted, prices) if price > 0]
     variants += [(-1, [factor * price for price in prices]) for factor in factors]
+    # What a job bidding on several platforms tries first, and the grid misses: one
+    # platform alone, at its bid or at its price, and each platform at its price.
+    for item, (price, cutoff) in enumerate(zip(prices, posted)):
+        if price > 0:
+            for level in (price, cutoff):
+                alone = [0.0] * len(prices)
+                alone[item] = level
+                variants.append((item, alone))
+    variants.append(
+        (-1, [cutoff if price > 0 else 0.0 for price, cutoff in zip(prices, posted)])
+    )
     if under_price:
         return variants
     return [
@@ -78,9 +89,11 @@ def grid_regret(
 
     One price at a time moves over `points` levels from zero to `span` times the
     job's highest price, and to that platform's posted price; then the whole report
-    is scaled over the same range and to each posted price. The best gain over the
-    truthful utility is a lower bound on the job's regret. Without `under_price`,
-    only reports that bid at or above each posted price, or not at all, count.
+    is scaled over the same range and to each posted price; then each platform the
+    job bid on is reported alone, at its bid or its posted price, and all of them at
+    their posted prices. The best gain over the truthful utility is a lower bound on
+    the job's regret. Without `under_price`, only reports that bid at or above each
+    posted price, or not at all, count.
     """
     jobs = list(jobs)
     names = list(platforms)
@@ -125,7 +138,8 @@ def refined_regret(
     point and of the truth (`sigma` times the job's highest price) and `starts`
     uniform draws, with every end point scored on the deployed mechanism. `gradient`
     is RegretFormer's own protocol: ascent from one uniform draw, scored on the
-    relaxed network. `under_price` limits the grid as in `grid_regret`.
+    relaxed network. `under_price` limits the grid as in `grid_regret`; without it,
+    refined reports under a posted price are raised to it before they are scored.
     """
     import numpy as np
     import torch
@@ -200,18 +214,23 @@ def refined_regret(
             rows.append(job)
             items.append(item)
             variants.append(prices)
-    rows, items = np.asarray(rows), np.asarray(items)
-    variants = torch.tensor(variants, dtype=torch.float64)
-    utilities = deployed(rows, variants)
+    rows, items = np.asarray(rows, dtype=int), np.asarray(items, dtype=int)
+    variants = torch.tensor(variants, dtype=torch.float64).reshape(-1, width)
+    utilities = deployed(rows, variants) if len(rows) else torch.zeros(0)
 
     grid, combined = [], truth.clone()
     for job in range(size):
         mine = torch.as_tensor(rows == job)
-        grid.append(float(max(utilities[mine].max(), truthful[job])))
+        best = float(utilities[mine].max()) if bool(mine.any()) else float("-inf")
+        grid.append(max(best, float(truthful[job])))
         for item in range(width):
             chosen = torch.as_tensor(np.flatnonzero((rows == job) & (items == item)))
-            best = chosen[int(utilities[chosen].argmax())]
-            combined[job, item] = variants[best, item]
+            # Without `under_price`, a job that bid under one price keeps no report
+            # varying another: that item stays truthful.
+            if len(chosen):
+                combined[job, item] = variants[
+                    chosen[int(utilities[chosen].argmax())], item
+                ]
 
     portfolio, owners = [], []
     diagonal = torch.arange(width)
@@ -234,7 +253,12 @@ def refined_regret(
         portfolio.append(block)
         owners += [job] * len(block)
     owners = np.asarray(owners)
-    scored = deployed(owners, ascend(owners, torch.cat(portfolio), steps))
+    ends = ascend(owners, torch.cat(portfolio), steps)
+    if not under_price:
+        # A refined report under a posted price bids that price instead.
+        floor = base.posted[0].to(ends.dtype)
+        ends = torch.where((ends > 0) & (ends < floor), floor, ends)
+    scored = deployed(owners, ends)
 
     draws = torch.rand(size, width, generator=generator, dtype=torch.float64)
     found = ascend(everyone, draws * span * top[:, None], gradient_steps)

@@ -44,6 +44,7 @@ def train_regretformer(
     seed=0,
     under_price=False,
     balance=False,
+    deployed=False,
     device="cpu",
     **shape,
 ):
@@ -56,8 +57,11 @@ def train_regretformer(
     grid misreports for up to `regret_jobs` jobs per window, and counts reports under a
     posted price only with `under_price`. With `balance`, each step draws its windows
     from one length bucket, chosen at random: one job, 2 to 4, 5 to 16, or 17 and more.
-    Returns the mechanism, back on the CPU, and each step's history, whose regret is the
-    relaxed network's: judge the deployed mechanism with `refined_regret`.
+    With `deployed`, outcomes and misreports are scored on the market's own rounding,
+    which places every job that fits, and gradients pass through the probabilities as if
+    the rounding were not there. Returns the mechanism, back on the CPU, and each step's
+    history; without `deployed` its regret is the relaxed network's. Judge the deployed
+    mechanism with `refined_regret`.
     """
     import numpy as np
     import torch
@@ -68,10 +72,31 @@ def train_regretformer(
     if objective not in ("revenue", "welfare"):
         raise ValueError("objective must be 'revenue' or 'welfare'")
 
+    def rounded(allocation, offer, window):
+        # The market's own placement: one-hot cells from the deployed rounding.
+        probabilities = allocation.detach().cpu().numpy()
+        offered = offer.cpu().numpy()
+        nodes, free = window.nodes.cpu().numpy(), window.free.cpu().numpy()
+        placed = np.stack(
+            [
+                learned._round(probabilities[row], offered[row], nodes[row], free[row])
+                for row in range(len(probabilities))
+            ]
+        )
+        rows, jobs = np.nonzero(placed >= 0)
+        hard = torch.zeros_like(allocation)
+        hard[rows, jobs, placed[rows, jobs]] = 1.0
+        return hard
+
     def outcome(window, prices, truth):
         channels, offer = window.features(prices)
         probabilities, fractions = net(channels, offer, window.jobs)
         allocation = probabilities[..., : prices.shape[-1]]
+        if deployed:
+            # Forward through the deployed placement, backward through the network's
+            # probabilities.
+            hard = rounded(allocation, offer, window)
+            allocation = hard + allocation - allocation.detach()
         cost = window.cost()
         charge = learned.charge(cost, window.value(prices), fractions[..., None])
         gain = window.value(truth) - charge

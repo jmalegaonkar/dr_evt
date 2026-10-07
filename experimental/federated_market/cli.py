@@ -75,6 +75,7 @@ def _parser():
     train_parser.add_argument("--seed", type=int, default=0)
     train_parser.add_argument("--under-price", action="store_true")
     train_parser.add_argument("--balance", action="store_true")
+    train_parser.add_argument("--deployed", action="store_true")
     train_parser.add_argument("--device", default="cpu")
 
     prepare_parser = commands.add_parser("prepare", help="prepare trace jobs")
@@ -168,6 +169,7 @@ def _train(args):
             seed=args.seed,
             under_price=args.under_price,
             balance=args.balance,
+            deployed=args.deployed,
             device=args.device,
         )
     mechanism.save(
@@ -178,6 +180,7 @@ def _train(args):
         files=[str(path) for path in args.windows],
         under_price=args.under_price,
         balance=args.balance,
+        deployed=args.deployed,
     )
     print(f"windows={len(windows)}")
     for key in ("objective", "regret", "multiplier"):

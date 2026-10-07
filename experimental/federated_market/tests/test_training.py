@@ -95,6 +95,20 @@ class TrainingTests(unittest.TestCase):
         self.assertTrue(all(len(values) == 3 for values in history.values()))
         self.assertEqual(len(result.routed) + len(result.waiting), len(jobs))
 
+    def test_deployed_training_never_overbooks(self) -> None:
+        """Scored on the market's rounding, training sees no overbooked nodes."""
+        jobs = read_jobs(_DATA / "jobs.csv")
+        options = {"steps": 3, "batch": 4, "regret_jobs": 2, "points": 5, "seed": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory) / "recorded", share=0.1)
+            windows = record_windows(jobs, platforms)
+            trained, history = train_regretformer(
+                windows, platforms, deployed=True, **options
+            )
+            result = run(jobs, federation(Path(directory) / "run", share=0.1), trained)
+        self.assertEqual(history["overbooked"], [0.0, 0.0, 0.0])
+        self.assertEqual(len(result.routed) + len(result.waiting), len(jobs))
+
     def test_command_line_trains_a_network_that_runs(self) -> None:
         """Harvested windows train a checkpoint that the run command uses."""
         with tempfile.TemporaryDirectory() as directory:

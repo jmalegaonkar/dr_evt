@@ -104,14 +104,18 @@ $$
 its cost plus a share of its surplus or, when it bid under the price, its whole bid.
 `learned.charge` holds this rule for deployment, training and regret alike.
 
-**Training** (`train_regretformer`, or `python -m federated_market train`). `harvest` runs
-the market on many job streams under several mechanisms and keeps every window's batch
-and free nodes (step 7). Each step draws 8 of those windows and computes a relaxed
+**Training** (`train_regretformer`, or `python -m federated_market train`). `harvest`
+runs the market on many job streams under several mechanisms and keeps every window's
+batch and free nodes (step 7). Each step draws 8 of those windows and computes a relaxed
 outcome, in which the probabilities stand for the allocation. Most windows hold one job,
-so with `balance` (`train --balance`) a step first picks a length at random, one job,
-2 to 4, 5 to 16, or 17 and more, and draws all 8 windows of that length: longer windows,
+so with `balance` (`train --balance`) a step first picks a length at random, one job, 2
+to 4, 5 to 16, or 17 and more, and draws all 8 windows of that length: longer windows,
 where jobs compete, count as much as the rest, and a step's windows pad to similar
-sizes. The loss is
+sizes. The relaxed outcome can put probability on waiting for a job the market will
+place anyway, since the market places every job that fits; the regret training holds
+small is then not the deployed mechanism's. With `deployed` (`train --deployed`),
+outcomes and misreports are scored on the market's own rounding instead, and gradients
+pass through the probabilities as if the rounding were not there. The loss is
 
 $$
 -\,\text{objective} + \lambda \cdot \text{regret}
@@ -124,8 +128,8 @@ where:
   probabilities, or the welfare with `objective="welfare"`, divided by the window's
   mean cost;
 - regret is the most a job gains by misreporting, over a 9-point item-wise grid of
-  reports for up to four jobs per window, counting only reports at or above each posted
-  price unless `under_price`;
+  reports and the strategic reports below, for up to four jobs per window, counting only
+  reports at or above each posted price unless `under_price`;
 - overbooked counts the nodes the relaxed allocation uses beyond the free ones, and idle
   the free nodes it leaves idle while a job that fits them waits.
 
@@ -138,9 +142,12 @@ measures, for one window and any mechanism, how much each job could gain by misr
 while the others report truthfully, on the decisions the mechanism applies. It moves one
 price at a time over 101 levels from zero to four times the job's highest price, and to
 that platform's posted price, then scales the whole report over the same range and to
-each posted price: the item-wise grid of You et al. (2026). The result is a lower bound.
-`refined_regret` adds their guided gradient refinement for RegretFormer, and reports
-beside it the gradient-only estimate of RegretFormer's own protocol.
+each posted price: the item-wise grid of You et al. (2026). A job that bids on several
+platforms has moves this grid misses, so it also reports each platform alone, at its bid
+or at its posted price, and every platform it bid on at its posted price: under pay what
+you bid, a job alone at one platform's price wins it at cost. The result is a lower
+bound. `refined_regret` adds their guided gradient refinement for RegretFormer, and
+reports beside it the gradient-only estimate of RegretFormer's own protocol.
 
 ## 6.6 Three jobs on two platforms
 

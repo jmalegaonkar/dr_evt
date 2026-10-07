@@ -23,6 +23,7 @@ from federated_market import (
     read_jobs,
     refined_regret,
 )
+from federated_market.mechanism.base import job_value
 
 _DATA = Path(__file__).with_name("data")
 _TORCH = importlib.util.find_spec("torch") is not None
@@ -58,6 +59,26 @@ class GridRegretTests(unittest.TestCase):
             paid = grid_regret(FirstPrice(), [job], platforms, free, under_price=False)
         self.assertAlmostEqual(vcg["shade"], 0.0)
         self.assertAlmostEqual(paid["shade"], (3.0 - 1.5) * 2 * 360 / 3600)
+
+    def test_shading_to_one_platforms_price_is_found(self) -> None:
+        """Pay what you bid loses a two-platform job its best surplus to shading."""
+        job = Job("shade", 0, 2, 360, {"corona": 3.0, "tuolumne": 1.0}, {"gpu"})
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(
+                Path(directory), share=0.1, names=("corona", "tuolumne")
+            )
+            free = {
+                name: platform.exposed_nodes for name, platform in platforms.items()
+            }
+            regret = grid_regret(
+                FirstPrice(), [job], platforms, free, points=5, under_price=False
+            )
+            best = max(
+                job_value(job, platform) - platform.cost(job)
+                for platform in platforms.values()
+            )
+        # Corona alone at its price wins Corona at cost: the whole surplus there.
+        self.assertAlmostEqual(regret["shade"], best)
 
     def test_first_fit_has_no_regret(self) -> None:
         """FirstFit reads no bid, so no report changes what a job gets or pays."""
@@ -114,6 +135,51 @@ class RefinedRegretTests(unittest.TestCase):
             self.assertGreaterEqual(estimate.grid, 0.0)
             self.assertGreaterEqual(estimate.refined, estimate.grid)
             self.assertGreaterEqual(estimate.gradient, 0.0)
+
+    def test_refined_reports_stay_at_or_above_the_price(self) -> None:
+        """Without reports under the price, refinement gains at most the surplus."""
+        job = Job("alone", 0, 2, 360, 3.0, {"gpu"})
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share=0.1, names=("corona",))
+            estimates = refined_regret(
+                RegretFormer(seed=4),
+                [job],
+                platforms,
+                {"corona": 12},
+                points=9,
+                starts=4,
+                steps=20,
+                gradient_steps=2,
+                under_price=False,
+            )
+            surplus = job_value(job, platforms["corona"]) - platforms["corona"].cost(
+                job
+            )
+        self.assertLessEqual(estimates["alone"].refined, surplus + 1e-9)
+
+    def test_a_bid_under_one_price_leaves_the_others_truthful(self) -> None:
+        """Without reports under the price, a job under Corona's keeps Tuolumne's bid."""
+        job = Job("under", 0, 2, 360, {"corona": 1.0, "tuolumne": 1.0}, {"gpu"})
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(
+                Path(directory), share=0.1, names=("corona", "tuolumne")
+            )
+            free = {
+                name: platform.exposed_nodes for name, platform in platforms.items()
+            }
+            estimates = refined_regret(
+                RegretFormer(seed=4),
+                [job],
+                platforms,
+                free,
+                points=9,
+                starts=2,
+                steps=2,
+                gradient_steps=2,
+                under_price=False,
+            )
+        self.assertGreaterEqual(estimates["under"].grid, 0.0)
+        self.assertGreaterEqual(estimates["under"].refined, estimates["under"].grid)
 
 
 if __name__ == "__main__":

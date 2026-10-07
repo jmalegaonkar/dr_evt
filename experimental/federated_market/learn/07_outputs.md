@@ -184,9 +184,10 @@ largest batch (`largest`).
 on them (step 6) and saves the network to `--out`. Its options are `--objective`
 (`revenue` or `welfare`), `--steps` (2000), `--seed` (0), `--under-price` to count
 misreports under the price in the regret, `--balance` to draw each step's windows from
-one length (step 6), and `--device` (`cpu`, or a GPU such as `cuda`). It needs torch but
-not dr_evt, and prints the windows read and the mean objective, regret and multiplier
-over the last 100 steps.
+one length, `--deployed` to score training on the market's own rounding (both in step
+6), and `--device` (`cpu`, or a GPU such as `cuda`). It needs torch but not dr_evt, and
+prints the windows read and the mean objective, regret and multiplier over the last 100
+steps.
 
 ## 7.8 Modelling choices
 
