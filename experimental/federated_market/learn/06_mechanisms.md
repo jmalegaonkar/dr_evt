@@ -1,15 +1,16 @@
 # Step 6: mechanisms
 
 A mechanism decides, for one window's batch, which job runs where and what each winner
-pays. This page gives each of the four mechanisms with its math, follows three jobs on
-two platforms through all of them, and covers how RegretFormer is trained and how regret
-is measured. Step 4 (`04_offers.md`) covers the contract every mechanism works within,
-with one window of the fixture under each mechanism; the overview of all steps is
-`master_overview.md`.
+pays. This page gives each of the five mechanisms with its math, follows three jobs on
+two platforms through four of them, and covers how RegretFormer is trained and how
+regret is measured. Step 4 (`04_offers.md`) covers the contract every mechanism works
+within, with one window of the fixture under each mechanism; the overview of all steps
+is `master_overview.md`.
 
-Code: `mechanism/vcg.py`, `mechanism/firstprice.py`, `mechanism/firstfit.py`,
-`mechanism/regretformer.py` with its network in `mechanism/learned.py`, training in
-`mechanism/training.py`, and regret in `mechanism/regret.py`.
+Code: `mechanism/vcg.py` with `Affine`, `mechanism/firstprice.py`,
+`mechanism/firstfit.py`, `mechanism/regretformer.py` with its network in
+`mechanism/learned.py`, training in `mechanism/training.py`, and regret in
+`mechanism/regret.py`.
 
 ## 6.1 What every mechanism keeps
 
@@ -82,7 +83,39 @@ equal costs go to the platform listed first. A job can land where it bid less th
 price, or did not bid at all (its value there is 0), and pay more than its value, so
 compare `FirstFit` with the auctions on service, not on welfare.
 
-## 6.5 RegretFormer
+## 6.5 The affine maximizer
+
+`Affine` (in `mechanism/vcg.py`) is VCG over reserves and weights that read only public
+facts. An offer's reserve is its cost marked up, $r_{ip} = (1 + m_p)\,c_{ip}$ with
+$m_p \ge 0$ by platform (`markup`, with `markups` overriding it per platform), and a
+job's weight $w_i > 0$ depends on its size (`weights`, keyed `small` and `wide`, wide
+from `wide` nodes up). The solve finds
+
+$$
+A = \max_x \sum_{i,p\,:\,v_{ip} \ge r_{ip}} w_i\,(v_{ip} - r_{ip})\, x_{ip}
+$$
+
+under the constraints of 6.1, and a winner pays its reserve plus its pivot over its
+weight,
+
+$$
+\text{charge}_i = r_{ip} + \frac{A_{-i} - (A - w_i\,(v_{ip} - r_{ip}))}{w_i},
+$$
+
+which lies between $r_{ip}$ and $v_{ip}$. Since no reserve or weight depends on a bid,
+this is an affine maximizer (Roberts, 1979): among bids at or above the reserves, no
+report beats the truth. VCG is the case $m_p = 0$, $w_i = 1$. Jobs the solve leaves out
+take the nodes left over in batch order, as under VCG, and pay $\min(r_{ip}, v_{ip})$.
+
+The market places every job that fits (step 4), so on idle nodes a job can bid the
+posted price and still be placed at cost: there a reserve above the cost cannot be
+enforced, and the markup a truthful bid pays is a gain its owner gives up. So a
+platform the window contests, whose fitting jobs need more nodes than it has free (a
+public fact), takes `markup` or its entry in `markups`, and one it leaves idle takes
+`idle` or its entry in `idle_markups`, the contested markup by default. With `idle=0`,
+only contested platforms are marked up, and idle ones run as VCG.
+
+## 6.6 RegretFormer
 
 **The network** (`learned.Network`) is that of Ivanov et al. (NeurIPS 2022), with the
 paper's defaults: hidden size 32, 2 attention heads, 1 layer. For every cell $(i, p)$ of
@@ -149,7 +182,7 @@ you bid, a job alone at one platform's price wins it at cost. The result is a lo
 bound. `refined_regret` adds their guided gradient refinement for RegretFormer, and
 reports beside it the gradient-only estimate of RegretFormer's own protocol.
 
-## 6.6 Three jobs on two platforms
+## 6.7 Three jobs on two platforms
 
 Platform A has 4 free nodes at 1.0 a node-hour and B has 6 at 2.0. Three jobs each have
 one hour of work at speed 1.0 and a bid on each platform:
@@ -211,7 +244,7 @@ the welfare is 5 against VCG's 14.
 leaves no platform with 4 nodes for J2. Its choices show the mechanics, not a learned
 policy.
 
-## 6.7 Incentives
+## 6.8 Incentives
 
 - **VCG is truthful among bids that cover the price.** When every bid is at or above the
   posted price, no report beats the truth
@@ -222,10 +255,17 @@ policy.
 - **Pay what you bid** charges the bid, so shading pays whenever the job still wins.
 - **`FirstFit`** reads no bid, so no report changes what a job gets or pays: its regret
   is zero (`test_first_fit_has_no_regret`), but a winner can pay more than its value.
+- **The affine maximizer** is truthful among bids at or above its reserves when its
+  winners fill the nodes (`test_shading_gains_nothing_when_the_winner_fills_the_nodes`).
+  Where nodes are left over, a job can bid the posted price and pay its cost rather than
+  its reserve, and a bid between the two is placed there and pays itself in full; either
+  way the markup bounds what shading gains. Marking up only contested platforms removes
+  this on idle ones, but a large contested markup prices jobs out of the solve and leaves
+  contested nodes over too.
 - **RegretFormer's** regret is whatever its training leaves; `refined_regret` measures
   it.
 
-## 6.8 Modelling choices
+## 6.9 Modelling choices
 
 These choices are open to revision:
 

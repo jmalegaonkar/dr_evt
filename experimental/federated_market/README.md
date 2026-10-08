@@ -47,7 +47,7 @@ for that interpreter under the install prefix (`lib/python` or `lib64/python`) o
 |---|---|
 | `jobs/` | the job record and jobs file, the trace readers, the persona bids, preparation and synthetic days |
 | `platforms.py` | a platform over one dr_evt simulation, the five machines, and `federation` |
-| `mechanism/` | the mechanism contract, VCG, pay what you bid, FirstFit, and RegretFormer with its training and regret estimates |
+| `mechanism/` | the mechanism contract, VCG and the affine maximizer, pay what you bid, FirstFit, and RegretFormer with its training and regret estimates |
 | `market.py` | the window loop, its checks, and the output files |
 | `harvest.py` | windows recorded from market runs, and the files that carry them to training |
 | `cli.py` | the four commands |

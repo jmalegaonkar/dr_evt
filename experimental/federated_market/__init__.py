@@ -11,6 +11,7 @@ from .harvest import harvest, read_windows, record_windows, write_windows
 from .jobs import Job, prepare, read_jobs, write_jobs
 from .market import MarketError, Result, RoutedJob, Waiting, run, write_outputs
 from .mechanism import (
+    Affine,
     Decision,
     FirstFit,
     FirstPrice,
@@ -38,6 +39,7 @@ from .platforms import (
 )
 
 __all__ = [
+    "Affine",
     "Corona",
     "Dane",
     "DEFAULT_FEDERATION",

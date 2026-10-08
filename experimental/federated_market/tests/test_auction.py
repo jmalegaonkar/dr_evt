@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from unittest import mock
 
 from federated_market import (
+    Affine,
     Decision,
     FirstFit,
     FirstPrice,
@@ -22,6 +23,7 @@ from federated_market import (
     Vcg,
     candidates,
     federation,
+    grid_regret,
     offers,
 )
 
@@ -455,6 +457,83 @@ class AuctionTests(unittest.TestCase):
                     for item in vcg
                 )
                 self.assertLessEqual(welfare, vcg_welfare + 1.0e-9)
+
+
+class AffineTests(unittest.TestCase):
+    """The affine maximizer: VCG without markups or weights, and its own terms."""
+
+    def test_without_markups_or_weights_it_is_vcg(self) -> None:
+        """No markup and unit weights decide exactly as VCG does."""
+        for jobs, platforms, free in _instances():
+            self.assertEqual(
+                Affine().decide(jobs, platforms, free),
+                Vcg().decide(jobs, platforms, free),
+            )
+
+    def test_a_winner_pays_its_reserve_and_a_bid_under_it_pays_itself(self) -> None:
+        """Alone, a job over the reserve pays it; one under it pays its whole bid."""
+        platforms = {"a": _Platform("a", 4, 1.0, frozenset({"cpu"}))}
+        mechanism = Affine(0.5)
+        # Two node-hours at a price of 1.0: cost 2.0, reserve 3.0.
+        (over,) = mechanism.decide([Job("over", 0, 2, 3600, 2.0)], platforms, {"a": 4})
+        (under,) = mechanism.decide(
+            [Job("under", 0, 2, 3600, 1.25)], platforms, {"a": 4}
+        )
+        self.assertAlmostEqual(over.charge, 3.0)
+        self.assertAlmostEqual(under.charge, 2.5)
+
+    def test_a_contested_markup_leaves_idle_nodes_at_cost(self) -> None:
+        """Marked up only under contention, a lone job pays its cost; rivals pay more."""
+        platforms = {"a": _Platform("a", 8, 1.0, frozenset({"cpu"}))}
+        mechanism = Affine(0.5, idle=0.0)
+        alone = Job("alone", 0, 2, 3600, 2.0)
+        (decision,) = mechanism.decide([alone], platforms, {"a": 8})
+        self.assertAlmostEqual(decision.charge, 2.0)
+        # Two jobs of 6 nodes on 8 free: the platform is contested, so the reserve is
+        # 1.5 times the cost and the winner pays at least that.
+        jobs = [Job("first", 0, 6, 3600, 3.0), Job("second", 0, 6, 3600, 2.0)]
+        (winner,) = mechanism.decide(jobs, platforms, {"a": 8})
+        self.assertEqual(winner.job_id, "first")
+        self.assertGreaterEqual(winner.charge, 1.5 * 6.0 - 1.0e-9)
+
+    def test_idle_markups_apply_per_platform(self) -> None:
+        """An idle platform takes its own markup, and a missing one the default."""
+        platforms = {
+            "a": _Platform("a", 8, 1.0, frozenset({"cpu"})),
+            "b": _Platform("b", 8, 1.0, frozenset({"cpu"})),
+        }
+        mechanism = Affine(1.0, idle=0.0, idle_markups={"a": 0.25})
+        only_a = Job("only_a", 0, 2, 3600, {"a": 3.0})
+        only_b = Job("only_b", 0, 2, 3600, {"b": 3.0})
+        free = {"a": 8, "b": 8}
+        (on_a,) = mechanism.decide([only_a], platforms, free)
+        (on_b,) = mechanism.decide([only_b], platforms, free)
+        # Two node-hours at a price of 1.0 cost 2.0, marked up by 0.25 on a and 0 on b.
+        self.assertAlmostEqual(on_a.charge, 2.5)
+        self.assertAlmostEqual(on_b.charge, 2.0)
+
+    def test_a_weight_gives_the_nodes_to_a_wide_job(self) -> None:
+        """Weighted three times, the wide job outbids the small one and pays more."""
+        platforms = {"a": _Platform("a", 8, 1.0, frozenset({"cpu"}))}
+        # Small: value 12, cost 4. Wide: value 12, cost 8. Both need the 8 nodes.
+        jobs = [Job("small", 0, 4, 3600, 3.0), Job("wide", 0, 8, 3600, 1.5)]
+        vcg = Vcg().decide(jobs, platforms, {"a": 8})
+        affine = Affine(weights={"wide": 3.0}).decide(jobs, platforms, {"a": 8})
+        self.assertEqual([decision.job_id for decision in vcg], ["small"])
+        self.assertEqual([decision.job_id for decision in affine], ["wide"])
+        # Its reserve, 8, plus the small job's 8 it displaces, over its weight.
+        self.assertAlmostEqual(affine[0].charge, 8.0 + 8.0 / 3.0)
+
+    def test_shading_gains_nothing_when_the_winner_fills_the_nodes(self) -> None:
+        """With no nodes left to fill, no report at or above a price beats the truth."""
+        platforms = {"a": _Platform("a", 8, 1.0, frozenset({"cpu"}))}
+        jobs = [Job("small", 0, 4, 3600, 3.0), Job("wide", 0, 8, 3600, 1.5)]
+        mechanism = Affine(0.25, weights={"wide": 3.0})
+        regret = grid_regret(
+            mechanism, jobs, platforms, {"a": 8}, points=9, under_price=False
+        )
+        for value in regret.values():
+            self.assertAlmostEqual(value, 0.0)
 
 
 if __name__ == "__main__":

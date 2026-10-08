@@ -13,7 +13,7 @@ from .firstprice import FirstPrice
 from .regret import grid_regret, refined_regret
 from .regretformer import RegretFormer
 from .training import train_regretformer
-from .vcg import Vcg
+from .vcg import Affine, Vcg
 
 MECHANISMS = {
     "vcg": Vcg,
@@ -23,6 +23,7 @@ MECHANISMS = {
 }
 
 __all__ = [
+    "Affine",
     "Decision",
     "FirstFit",
     "FirstPrice",
