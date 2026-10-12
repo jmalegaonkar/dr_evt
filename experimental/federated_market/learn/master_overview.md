@@ -21,8 +21,8 @@ LC traces --prepare--> jobs.csv --run--> every 30 s: admit arrivals
   per node-hour, a speed relative to Quartz, and a `share` of its nodes exposed to the
   federation.
 - **Mechanisms** decide who runs where and what they pay: VCG (the welfare-maximizing
-  auction), pay what you bid, `FirstFit` (the bid-blind baseline) and RegretFormer (a
-  learned mechanism).
+  auction), the affine maximizer (VCG over public markups and weights), pay what you
+  bid, `FirstFit` (the bid-blind baseline) and RegretFormer (a learned mechanism).
 - **The market never turns a job away.** A job waits in the queue until a platform it
   bid on has room for it, and every winner starts in the window it wins.
 
@@ -143,7 +143,9 @@ Code: `market.py` (`run`, `_check_decisions`, `_blocked_by`). Details: `05_loop.
    jobs that have arrived, read the free nodes, and form the batch: the first 32 queued
    jobs that can be placed now, whatever they bid. The others keep their place in the
    queue. When the winners leave free nodes that a later job bid on, the next 32 jobs
-   that fit them are auctioned for those nodes, up to the first 256 queued jobs.
+   that fit them are auctioned for those nodes, up to the first 256 queued jobs that
+   can be placed. With aging (off by default), a job's bids rise for every 10 minutes
+   it has waited, and the federation pays that credit.
 3. **Decision.** The mechanism decides, and the market checks that every job is decided
    once, belongs to the batch and gets a platform it has an offer on; that its charge
    is at most the mechanism's cap and at least its cost, or the cap when that is less;
@@ -165,6 +167,11 @@ Details, with the math and three jobs followed through each: `06_mechanisms.md`.
   presence takes from the others. A job the solve leaves out that still fits, such as
   one that bid under the price, takes the leftover nodes at its cost, or its whole bid
   when that is less.
+- **The affine maximizer** (`Affine` in `mechanism/vcg.py`, from Python only). VCG over
+  public terms: each offer's cost is marked up, separately on the platforms a window
+  contests and on idle ones, and each job's surplus is weighted by its size. A winner
+  pays its reserve plus its pivot over its weight, and the jobs the solve leaves out
+  take the leftover nodes at the lesser of their reserve and their bid.
 - **Pay what you bid** (`mechanism/firstprice.py`). Offers are taken greedily by net
   value, ties going to the earlier job and then the first platform by name, and each
   winner pays its full value. Bids under the price come last.
@@ -183,14 +190,16 @@ Details, with the math and three jobs followed through each: `06_mechanisms.md`.
 Code: `market.py` (`write_outputs`) and `cli.py`. Details: `07_outputs.md`.
 
 - **`routed.csv`**: each routed job's platform, window, cost, value, premium, charge,
-  and submit, begin and end times, in the order placed.
+  subsidy (the federation's part of the charge under aging), and submit, begin and end
+  times, in the order placed.
 - **`waiting.csv`**: the jobs that never ran, with the reason.
 - **`service.csv`**: for each community (the job's source) and for `all`: the count,
   the mean wait, the mean wait weighted by node-hours, and the mean bounded slowdown
   `max(1, (wait + run) / max(run, 10))`.
 - **`summary.json`**: the configuration, each platform's completed jobs, utilization
   and makespan from dr_evt, welfare (the total of value minus cost), revenue (the total
-  of charges), the counts, and the SHA-256 digest of `routed.csv`.
+  of charges), the subsidy (the federation's part of it), the counts, and the SHA-256
+  digest of `routed.csv`.
 
 The commands are `python -m federated_market prepare` (traces to a jobs file), `run` (a
 jobs file through one mechanism), `harvest` (the windows of runs under several

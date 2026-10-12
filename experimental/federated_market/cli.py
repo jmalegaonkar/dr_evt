@@ -50,6 +50,8 @@ def _parser():
     run_parser.add_argument("--prefix", type=int, default=32)
     run_parser.add_argument("--max-prefix", type=int, default=256)
     run_parser.add_argument("--window", type=int, default=30)
+    run_parser.add_argument("--aging", type=float, default=0.0)
+    run_parser.add_argument("--aging-cap", type=float, default=1.0)
     run_parser.add_argument("--mechanism", choices=MECHANISMS, default="vcg")
     run_parser.add_argument("--checkpoint", type=Path)
     run_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
@@ -120,6 +122,8 @@ def _run(args):
             window_s=args.window,
             prefix=args.prefix,
             max_prefix=args.max_prefix,
+            aging=args.aging,
+            aging_cap=args.aging_cap,
         )
     paths = write_outputs(result, args.out)
     windows = max((row.window for row in result.routed), default=-1) + 1

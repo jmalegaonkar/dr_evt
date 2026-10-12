@@ -148,7 +148,7 @@ class MarketTests(unittest.TestCase):
         # This changes only when the fixture or the model changes.
         self.assertEqual(
             outputs["sha256"],
-            "b15ef37b85a5b63f8718e5b1b21ed9ff26345ea1a284bb1f480ede606562de49",
+            "31714f24a7dbd193f00e6399906e14fd21fe722244d7078251a8c9c160e941d6",
         )
 
     def test_routed_output_is_byte_identical(self) -> None:
@@ -322,6 +322,54 @@ class MarketTests(unittest.TestCase):
         self.assertLess(poor.charge, poor.cost)
         self.assertAlmostEqual(poor.charge, poor.value)
 
+    def test_aging_lets_a_long_wait_outbid_a_newcomer(self) -> None:
+        """Ten minutes waited raise a bid, and the federation pays the credit."""
+        jobs = [
+            Job("blocker", 0, 12, 900, 3.0, {"gpu"}),
+            Job("old", 0, 12, 60, 1.5, {"gpu"}),
+            Job("new", 870, 12, 60, 2.0, {"gpu"}),
+        ]
+        routed = {}
+        for aging in (0.0, 0.15):
+            with tempfile.TemporaryDirectory() as directory:
+                platforms = federation(Path(directory), share=0.1, names=("corona",))
+                result = run(jobs, platforms, Vcg(), aging=aging)
+            routed[aging] = {row.job_id: row for row in result.routed}
+        # When Corona frees up at 900 s, the newcomer outbids the job that waited.
+        self.assertEqual(routed[0.0]["new"].begin_s, 900)
+        self.assertEqual(routed[0.0]["old"].begin_s, 960)
+        # Fifteen minutes earn the old job a credit of 0.15, more than the newcomer's
+        # surplus of 0.1, so it wins. Corona gets its cost plus that surplus, 0.4, the
+        # federation pays the credit, and the job pays 0.25 of the 0.3 it is worth.
+        old = routed[0.15]["old"]
+        self.assertEqual((old.begin_s, routed[0.15]["new"].begin_s), (900, 960))
+        self.assertAlmostEqual(old.value, 0.3)
+        self.assertAlmostEqual(old.charge, 0.4)
+        self.assertAlmostEqual(old.subsidy, 0.15)
+
+    def test_a_credit_stops_at_its_cap(self) -> None:
+        """A credit grows every ten minutes up to its cap, and it cannot be negative."""
+        jobs = [
+            Job("blocker", 0, 115, 6000, 1.0, {"gpu"}),
+            Job("waiter", 0, 115, 3600, 0.19, {"gpu"}),
+        ]
+        # After half an hour the waiter has earned 15. Alone when Tuolumne frees up,
+        # it is charged its cost, 6.6, and the federation pays the credit up to the cap,
+        # but never more than the charge.
+        for cap in (1.0, 10.0):
+            with self.subTest(cap=cap), tempfile.TemporaryDirectory() as directory:
+                platforms = federation(Path(directory), share=0.1, names=("tuolumne",))
+                result = run(jobs, platforms, Vcg(), aging=5.0, aging_cap=cap)
+                cost = platforms["tuolumne"].cost(jobs[1])
+                waiter = next(row for row in result.routed if row.job_id == "waiter")
+                self.assertEqual(waiter.begin_s, 1830)
+                self.assertAlmostEqual(waiter.charge, cost)
+                self.assertAlmostEqual(waiter.subsidy, min(cap, cost))
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(Path(directory), share=0.1, names=("tuolumne",))
+            with self.assertRaisesRegex(ValueError, "aging"):
+                run(jobs, platforms, Vcg(), aging=-0.1)
+
     def test_a_platform_with_no_nodes_takes_no_jobs(self) -> None:
         """A share of zero exposes no nodes, and the market routes around it."""
         jobs = read_jobs(_DATA / "jobs.csv")
@@ -439,7 +487,7 @@ class MarketTests(unittest.TestCase):
             )
             self.assertIn(
                 "routed_sha256="
-                "b15ef37b85a5b63f8718e5b1b21ed9ff26345ea1a284bb1f480ede606562de49",
+                "31714f24a7dbd193f00e6399906e14fd21fe722244d7078251a8c9c160e941d6",
                 completed.stdout.splitlines(),
             )
             first_price = subprocess.run(

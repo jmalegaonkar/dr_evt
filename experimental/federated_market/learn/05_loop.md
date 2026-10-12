@@ -7,8 +7,9 @@ window. Step 4 (`04_offers.md`) looks inside one window; the overview of all ste
 `master_overview.md`.
 
 Code: `run` and `_auction` in `market.py`, with the window length (`window_s`, 30 s by
-default), the number of jobs an auction takes (`prefix`, 32) and the most queued jobs a
-window reaches (`max_prefix`, 256).
+default), the number of jobs an auction takes (`prefix`, 32), the most jobs a window
+reaches among those that can be placed (`max_prefix`, 256), and aging (`aging` and
+`aging_cap`, off by default).
 
 ## 5.1 The loop
 
@@ -23,14 +24,16 @@ window reaches (`max_prefix`, 256).
    2. Admit the arrivals with `submit <= t` to the end of the queue.
    3. Read each platform's free nodes.
    4. Form the batch: the first `prefix` queued jobs that can be placed now. A job with
-      no candidate is skipped for the window and keeps its place.
+      no candidate is skipped for the window and keeps its place. With aging, each
+      job's bids first rise by its credit (section 5.3).
    5. Let the mechanism decide, and check its decisions (step 4). While the winners
       leave free nodes that a later job bid on, auction the next `prefix` jobs that fit
-      those nodes, among the first `max_prefix` queued. Earlier winners keep theirs.
+      those nodes, among the first `max_prefix` that could be placed when the window
+      opened. Earlier winners keep theirs.
    6. Submit the winners to their platforms and advance again: no winner may still
       wait in dr_evt's queue, or the run stops with `MarketError`.
    7. Record each winner: its window, begin `t`, end `t` plus its hold time, cost,
-      value, premium and charge.
+      value, premium, charge and subsidy.
    8. Remove the winners from the queue. The others keep their places.
 4. **Stop and drain.** The loop ends when every arrival has been admitted and the
    queue is empty. Every platform is then advanced to the last end, and the statistics
@@ -71,7 +74,39 @@ aside as `oversize` from its arrival at 180 s.
 - **The end.** After window 10 no arrival is left and the queue is empty. The last job
   ends at 318 s, and the drain advances every platform to 330 s.
 
-## 5.3 What follows
+## 5.3 Aging
+
+With `aging` (`run --aging`), a job that keeps waiting bids more. Every whole 10 minutes
+since its submission adds `aging` to its value on each platform it bid on, in the posted
+prices' unit, up to `aging_cap` in all (`--aging-cap`, 1.0 by default). The credit
+depends only on how long the job has waited, a public fact, never on its bid or its
+size. Aging is off by default.
+
+- **What the mechanism sees.** The raised bids, in every window where the job can be
+  placed. The credit is the same on every platform, so it changes who wins wherever jobs
+  compete but never which platform a job prefers. It never creates an offer: a
+  platform the job did not bid on gets no credit.
+- **Who pays.** The federation. The platform receives the whole charge, and the job
+  pays the charge less its credit on that platform, never below zero. The ledger
+  records the federation's part as `subsidy` (step 7), and `value` stays what the job
+  bid, so the credit never counts as welfare.
+- **What it reaches.** A job that lost an auction gains on the jobs that beat it. A job
+  that cannot be placed at all, such as a wide one on a crowded platform, gains nothing
+  while it waits, but brings its credit to the window when room appears.
+- **Why the same credit for every job.** Waiting, not size, earns it. A credit that grew
+  with a job's size would let a large job that waited take freed nodes from many small
+  ones.
+- **Incentives.** Within a window the credit is a public boost: a job is treated exactly
+  as a job that bid its credit more, so no mechanism's incentives change there. Across
+  windows they do: waiting costs a job nothing in this model, so a job could bid low now
+  and collect credit for later. The cap bounds that gain.
+
+Nothing in the fixture waits 10 minutes, so aging changes nothing there.
+`test_aging_lets_a_long_wait_outbid_a_newcomer` shows it at work: a job that waited 15
+minutes earns a credit of 0.15, outbids a newcomer whose surplus is 0.1, and pays 0.25
+of a 0.4 charge.
+
+## 5.4 What follows
 
 - **Most waiting is the window.** A job that arrives when its platforms have room still
   waits for the next window, half a window on average. With a lightly loaded federation
@@ -84,7 +119,7 @@ aside as `oversize` from its arrival at 180 s.
 - **A job without a candidate does not block the queue.** It keeps its place, and the
   jobs behind it are auctioned in the meantime.
 
-## 5.4 Modelling choices
+## 5.5 Modelling choices
 
 These choices are open to revision:
 

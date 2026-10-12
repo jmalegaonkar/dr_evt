@@ -17,10 +17,10 @@ SHA-256 digest of the ledger.
 
 | file | one row per | columns |
 |---|---|---|
-| `routed.csv` | winner, in the order placed | `job_id`, `platform`, `window`, `cost`, `value`, `premium`, `charge`, `submit_s`, `begin_s`, `end_s` |
+| `routed.csv` | winner, in the order placed | `job_id`, `platform`, `window`, `cost`, `value`, `premium`, `charge`, `subsidy`, `submit_s`, `begin_s`, `end_s` |
 | `waiting.csv` | job set aside at intake | `job_id`, `reason`, `submit_s` |
 | `service.csv` | community, then `all` | `community`, `count`, `mean_wait_s`, `node_hour_weighted_mean_wait_s`, `mean_bounded_slowdown` |
-| `summary.json` | run | `configuration`, `service`, `statistics`, `welfare`, `revenue`, `routed`, `waiting`, `sha256` |
+| `summary.json` | run | `configuration`, `service`, `statistics`, `welfare`, `revenue`, `subsidy`, `routed`, `waiting`, `sha256` |
 
 The CSV columns are the fields of `RoutedJob`, `Waiting` and `_Service`, so the files
 cannot drift from the code. Money is in the unit of the posted prices, and times are
@@ -39,18 +39,21 @@ Rows come window by window, and within a window in batch order.
 - `charge` is what the mechanism set, and `premium` is `charge - cost`. It is zero for a
   winner that displaces nobody, and negative for a job that bid under the price and pays
   its whole bid.
+- `subsidy` is the federation's part of the charge under aging (step 5): the platform
+  receives the charge, and the job pays `charge - subsidy`. Without aging it is zero.
+  `value` is always what the job bid, without its credit.
 
 Seven of the fixture's nineteen rows, under VCG at share 0.1:
 
-| job_id | platform | window | cost | value | premium | charge | submit_s | begin_s | end_s |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| j000001 | tuolumne | 0 | 0.6781 | 1.5000 | 0.5146 | 1.1927 | 0 | 0 | 129 |
-| j000002 | dane | 0 | 0.6969 | 0.9333 | 0.0930 | 0.7898 | 0 | 0 | 175 |
-| j000003 | dane | 0 | 0.2236 | 0.2781 | 0 | 0.2236 | 0 | 0 | 64 |
-| j000005 | tuolumne | 0 | 0.0024 | 0.0079 | 0 | 0.0024 | 0 | 0 | 16 |
-| j000010 | corona | 3 | 0.0500 | 0.5000 | 0 | 0.0500 | 90 | 90 | 130 |
-| j000004 | tuolumne | 5 | 0.3154 | 0.8301 | 0 | 0.3154 | 0 | 150 | 205 |
-| j000015 | corona | 6 | 0.0833 | 0.0778 | -0.0056 | 0.0778 | 180 | 180 | 230 |
+| job_id | platform | window | cost | value | premium | charge | subsidy | submit_s | begin_s | end_s |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| j000001 | tuolumne | 0 | 0.6781 | 1.5000 | 0.5146 | 1.1927 | 0 | 0 | 0 | 129 |
+| j000002 | dane | 0 | 0.6969 | 0.9333 | 0.0930 | 0.7898 | 0 | 0 | 0 | 175 |
+| j000003 | dane | 0 | 0.2236 | 0.2781 | 0 | 0.2236 | 0 | 0 | 0 | 64 |
+| j000005 | tuolumne | 0 | 0.0024 | 0.0079 | 0 | 0.0024 | 0 | 0 | 0 | 16 |
+| j000010 | corona | 3 | 0.0500 | 0.5000 | 0 | 0.0500 | 0 | 90 | 90 | 130 |
+| j000004 | tuolumne | 5 | 0.3154 | 0.8301 | 0 | 0.3154 | 0 | 0 | 150 | 205 |
+| j000015 | corona | 6 | 0.0833 | 0.0778 | -0.0056 | 0.0778 | 0 | 180 | 180 | 230 |
 
 j000001 and j000002 pay pivots (step 4). j000004 waits from 0 to 150 for Tuolumne's
 nodes; every other job arrives on a window and starts at once. j000015 bid under
@@ -103,17 +106,20 @@ node-hours.
 
 ## 7.5 The summary, `summary.json`
 
-- `configuration`: the mechanism's name, `window_s`, `prefix`, `max_prefix`, and for
-  each platform its total and exposed nodes, posted price, hardware and speeds.
+- `configuration`: the mechanism's name, `window_s`, `prefix`, `max_prefix`, `aging`,
+  `aging_cap`, and for each platform its total and exposed nodes, posted price, hardware
+  and speeds.
 - `service`: the rows of `service.csv`, keyed by community.
 - `statistics`: what each platform's dr_evt simulation measured. `jobs_completed`;
   `makespan`, the platform's latest completion time, counted from 0; and `utilization`,
   the node-seconds allocated over the exposed nodes times that makespan.
-- `welfare`: the total of `value - cost` over the winners, and `revenue`: the total of
-  the charges, what the users pay.
+- `welfare`: the total of `value - cost` over the winners; `revenue`: the total of the
+  charges, what the platforms receive; and `subsidy`: the federation's part of it, so
+  that users pay `revenue - subsidy`.
 - `routed` and `waiting`: the two counts, and `sha256`: the digest of `routed.csv`.
 
-The fixture's run has welfare 5.3332, revenue 3.0718, 19 routed and 1 waiting. Corona's
+The fixture's run has welfare 5.3332, revenue 3.0718, no subsidy, 19 routed and 1
+waiting. Corona's
 statistics read 2 jobs completed, a makespan of 230 s and a utilization of 0.1159: 320
 node-seconds over 12 nodes times 230 s.
 
@@ -156,8 +162,10 @@ ledger's digest.
 | `--jobs`, `--out` | required | the jobs file and the output directory |
 | `--share` | 1.0 | one share, or `name=share,...` with 1.0 for the others |
 | `--prefix` | 32 | jobs per auction |
-| `--max-prefix` | 256 | the most queued jobs a window auctions |
+| `--max-prefix` | 256 | the most jobs a window auctions, among those that can be placed |
 | `--window` | 30 | the window length in seconds |
+| `--aging` | 0, off | the credit a waiting job's value gains on each platform it bid on, for every 10 minutes it waits (step 5) |
+| `--aging-cap` | 1.0 | the most credit a job can earn |
 | `--mechanism` | `vcg` | `vcg`, `firstprice`, `firstfit` or `regretformer` |
 | `--checkpoint` | none | the saved network, required for `regretformer` |
 | `--platforms` | all five | the federation |
@@ -168,7 +176,7 @@ On the fixture, `run --jobs tests/data/jobs.csv --out results --share 0.1` print
 windows=11
 routed=19
 waiting=1
-routed_sha256=b15ef37b85a5b63f8718e5b1b21ed9ff26345ea1a284bb1f480ede606562de49
+routed_sha256=31714f24a7dbd193f00e6399906e14fd21fe722244d7078251a8c9c160e941d6
 ```
 
 **`harvest`** runs each `--jobs` file under each `--mechanism` (repeatable; `vcg` when
@@ -193,8 +201,9 @@ steps.
 
 These choices are open to revision:
 
-- **Revenue is what users pay**, the total of the charges; welfare subtracts the posted
-  costs, so a job placed under the price lowers it.
+- **Revenue is what the platforms receive**, the total of the charges; users pay that
+  less the subsidy, which is zero without aging. Welfare subtracts the posted costs, so
+  a job placed under the price lowers it, and it never counts a credit.
 - **Service counts routed jobs only.** Jobs set aside never wait in the queue, so they
   appear in `waiting.csv` and in no measure.
 - **Each platform's utilization runs to its own makespan**, so platforms whose last jobs

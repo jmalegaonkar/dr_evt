@@ -10,16 +10,19 @@
 import csv
 import hashlib
 import json
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 
 from .mechanism import Decision, Mechanism, candidates
 from .mechanism.base import TOLERANCE, job_value
 
+# A queued job's credit grows once for every whole period it has waited.
+_AGING_PERIOD_S = 600
+
 
 @dataclass(frozen=True)
 class RoutedJob:
-    """One winning job and its realized route and payment."""
+    """One winning job, its route, its charge and the federation's part of it."""
 
     job_id: str
     platform: str
@@ -28,6 +31,7 @@ class RoutedJob:
     value: float
     premium: float
     charge: float
+    subsidy: float
     submit_s: int
     begin_s: int
     end_s: int
@@ -125,12 +129,36 @@ def _auction(able, platforms, free_nodes, mechanism, prefix, max_prefix):
         later = [job for job in later if job.job_id not in taken]
 
 
-def _configuration(platforms, mechanism, window_s, prefix, max_prefix):
+def _credit(job, t, aging, aging_cap) -> float:
+    """Return a queued job's credit at time t, in the posted prices' unit."""
+    return min(aging * ((t - job.submit_s) // _AGING_PERIOD_S), aging_cap)
+
+
+def _aged(job, platforms, credit):
+    """Return the job with its credit added to its value on each platform it bid on."""
+    if credit <= 0:
+        return job
+    bid = {}
+    for name, platform in platforms.items():
+        price = job.price(name) or 0.0
+        if price > 0 and platform.fits(job):
+            # Prices are per node-hour of the platform, where a single bid's price
+            # scales by speed, and the credit spreads over the node-hours used there.
+            speed = platform.job_speed(job)
+            node_hours = job.num_nodes * job.limit_s / speed / 3600
+            scale = 1.0 if isinstance(job.bid, dict) else speed
+            bid[name] = price * scale + credit / node_hours
+    return replace(job, bid=bid)
+
+
+def _configuration(platforms, mechanism, window_s, prefix, max_prefix, aging, cap):
     return {
         "mechanism": mechanism.name,
         "window_s": window_s,
         "prefix": prefix,
         "max_prefix": max_prefix,
+        "aging": aging,
+        "aging_cap": cap,
         "platforms": {
             name: {
                 "total_nodes": platform.total_nodes,
@@ -162,8 +190,16 @@ def run(
     window_s: int = 30,
     prefix: int = 32,
     max_prefix: int = 256,
+    aging: float = 0.0,
+    aging_cap: float = 1.0,
 ) -> Result:
-    """Route an arrival stream through fixed market windows."""
+    """Route an arrival stream through fixed market windows.
+
+    With `aging`, every 10 minutes a queued job has waited adds `aging` to its value
+    on each platform it bid on, up to `aging_cap` in all: the same credit for every
+    job, whatever its size. The federation pays it: the platform gets the whole
+    charge, and the job pays the charge less its credit, never below zero.
+    """
     for name, value in (
         ("window_s", window_s),
         ("prefix", prefix),
@@ -173,6 +209,9 @@ def run(
             raise ValueError(f"{name} must be a positive integer")
     if max_prefix < prefix:
         raise ValueError("max_prefix must be at least prefix")
+    # A negative credit could withdraw a job's every offer and leave it queued forever.
+    if aging < 0 or aging_cap < 0:
+        raise ValueError("aging and aging_cap must not be negative")
 
     # The sort is stable, so jobs submitted together keep their input order.
     ordered = sorted(jobs, key=lambda job: job.submit_s)
@@ -205,7 +244,11 @@ def run(
         free = {name: platform.free_nodes() for name, platform in platforms.items()}
         # The window opens on public facts: the first jobs that can be placed now,
         # whatever they bid. Later jobs get only the nodes its auctions leave free.
-        able = [job for job in queue if candidates(job, platforms, free)]
+        able = [
+            _aged(job, platforms, _credit(job, t, aging, aging_cap))
+            for job in queue
+            if candidates(job, platforms, free)
+        ]
         winners = _auction(able, platforms, free, mechanism, prefix, max_prefix)
         grouped = {name: [] for name in platforms}
         for job, decision, _, _ in winners:
@@ -220,19 +263,25 @@ def run(
             if platform.waiting() != 0:
                 raise MarketError(f"{name}: a winner is waiting")
 
+        queued = {job.job_id: job for job in queue}
         for job, decision, cost, value in winners:
+            platform = platforms[decision.platform]
+            # The mechanism read the credit as part of the bid; the job is worth
+            # what it bid, and the federation pays the rest, never past the charge.
+            worth = job_value(queued[job.job_id], platform)
             routed.append(
                 RoutedJob(
                     job.job_id,
                     decision.platform,
                     t // window_s,
                     cost,
-                    value,
+                    worth,
                     decision.charge - cost,
                     decision.charge,
+                    min(value - worth, decision.charge),
                     job.submit_s,
                     t,
-                    t + platforms[decision.platform].run_time(job),
+                    t + platform.run_time(job),
                 )
             )
         winner_ids = {decision.job_id for _, decision, _, _ in winners}
@@ -248,7 +297,9 @@ def run(
         routed,
         waiting,
         statistics,
-        _configuration(platforms, mechanism, window_s, prefix, max_prefix),
+        _configuration(
+            platforms, mechanism, window_s, prefix, max_prefix, aging, aging_cap
+        ),
         {job.job_id: (job.source, job.num_nodes) for job in ordered},
     )
 
@@ -318,6 +369,7 @@ def write_outputs(result: Result, out_dir) -> dict[str, str]:
         "statistics": result.statistics,
         "welfare": sum(row.value - row.cost for row in result.routed),
         "revenue": sum(row.charge for row in result.routed),
+        "subsidy": sum(row.subsidy for row in result.routed),
         "routed": len(result.routed),
         "waiting": len(result.waiting),
         "sha256": digest,

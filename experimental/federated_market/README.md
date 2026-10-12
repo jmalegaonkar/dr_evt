@@ -23,7 +23,8 @@ python -m federated_market run --jobs jobs.csv --out results --share 0.1
 `prepare` turns traces into a jobs file with a bid on each platform; with `--synthetic`
 it draws a new day from the interval instead. `run` routes the jobs through one
 mechanism, `vcg`, `firstprice`, `firstfit` or `regretformer`, and writes `routed.csv`,
-`waiting.csv`, `service.csv` and `summary.json`.
+`waiting.csv`, `service.csv` and `summary.json`. With `--aging`, a waiting job's bids
+rise every 10 minutes, and the federation pays that credit.
 
 To train RegretFormer, harvest windows from market runs, then train on them wherever
 torch runs; training needs neither dr_evt nor the traces:

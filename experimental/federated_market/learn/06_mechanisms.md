@@ -264,6 +264,11 @@ policy.
   contested nodes over too.
 - **RegretFormer's** regret is whatever its training leaves; `refined_regret` measures
   it.
+- **Aging** (step 5) raises a waiting job's bids by a credit that depends only on how
+  long it has waited, and the federation pays it. Within a window a job is treated
+  exactly as a job that bid its credit more, so no mechanism's incentives change there.
+  Across windows they do: waiting costs a job nothing in this model, so a job could bid
+  low now to collect credit for later, up to the cap.
 
 ## 6.9 Modelling choices
 
