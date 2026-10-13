@@ -150,31 +150,32 @@ rows read and kept, the drop counts, kept jobs per source, and jobs per persona.
 | `--platforms` | all five | the platforms bid on |
 | `--bids` | `multi` | `multi`, a bid on each platform, or `single` |
 
-**`fit`** fits one workload profile to each trace (1.7 of step 1), writes them to
-`--out` as JSON, and prints each source's jobs and its days of each type.
+**`fit`** fits one workload profile to the traces, merged into one stream (1.7 of step
+1), writes it to `--out` as JSON, and prints its jobs and its days of each type.
 
 | option | default | meaning |
 |---|---|---|
 | `--trace NAME=PATH` | required, repeatable | a trace and its source label |
-| `--out` | required | the profiles file to write |
+| `--out` | required | the profile to write |
 | `--format` | `lc` | `lc` or `simple` |
 | `--start`, `--hours` | the whole trace | the interval, in the trace's clock |
 | `--utc-offset` | 0 | the hours from UTC at which to read the hours of the day |
 
-**`generate`** draws days of jobs from profiles (1.7 of step 1) into a jobs file and
-prints its summary: the jobs, the arrays and jobs per source, the days of each type,
-and the jobs per persona. With `--load`, it first prints the volume it chose.
+**`generate`** draws days of jobs from a profile (1.7 of step 1) into a jobs file and
+prints its summary: the jobs, the jobs per source, the days of each type, and the jobs
+per persona. With `--load`, it first prints the volume it chose.
 
 | option | default | meaning |
 |---|---|---|
-| `--profile`, `--out` | required | the profiles file and the jobs file to write |
+| `--profile`, `--out` | required | the profile and the jobs file to write |
 | `--days` | 1 | a number of days of random types, or the types, such as `light,busy,busy` |
 | `--seed` | 0 | the seed for the days, hardware and bids |
-| `--volume` | 1.0 | copies of each array of an outline, on average |
+| `--volume` | 1.0 | streams of the type overlaid a day, on average |
 | `--load` | none | choose the volume so that a mean day's work is this share of the exposed nodes over 24 hours |
 | `--share`, `--platforms` | 1.0, all five | the federation whose exposed nodes `--load` counts, and the platforms bid on |
-| `--nodes LOW,HIGH` | all | refill only from arrays in this node range |
+| `--nodes LOW,HIGH` | all | refill only from jobs in this node range |
 | `--spread` | 0 | the log-normal variation of each day's volume |
+| `--jitter` | 600 | how far, in seconds, a burst may shift either way |
 | `--gpu-fraction`, `--requires`, `--bids` | as for `prepare` | hardware and bids |
 
 **`run`** routes a jobs file through one mechanism and writes the four files to `--out`,

@@ -12,20 +12,20 @@ from .prepare import generate, prepare
 from .workload import (
     DAY_TYPES,
     daily_node_hours,
-    fit_profiles,
-    read_profiles,
-    write_profiles,
+    fit_profile,
+    read_profile,
+    write_profile,
 )
 
 __all__ = [
     "DAY_TYPES",
     "Job",
     "daily_node_hours",
-    "fit_profiles",
+    "fit_profile",
     "generate",
     "prepare",
     "read_jobs",
-    "read_profiles",
+    "read_profile",
     "write_jobs",
-    "write_profiles",
+    "write_profile",
 ]

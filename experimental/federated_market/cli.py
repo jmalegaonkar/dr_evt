@@ -16,13 +16,13 @@ from .harvest import harvest, read_windows, write_windows
 from .jobs import (
     DAY_TYPES,
     daily_node_hours,
-    fit_profiles,
+    fit_profile,
     generate,
     prepare,
     read_jobs,
-    read_profiles,
+    read_profile,
     write_jobs,
-    write_profiles,
+    write_profile,
 )
 from .market import run, write_outputs
 from .mechanism import MECHANISMS, train_regretformer
@@ -122,7 +122,7 @@ def _parser():
     prepare_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
     prepare_parser.add_argument("--bids", choices=("multi", "single"), default="multi")
 
-    fit_parser = commands.add_parser("fit", help="fit workload profiles to traces")
+    fit_parser = commands.add_parser("fit", help="fit a workload profile to traces")
     fit_parser.add_argument("--trace", action="append", required=True)
     fit_parser.add_argument("--out", required=True, type=Path)
     fit_parser.add_argument("--format", choices=("lc", "simple"), default="lc")
@@ -131,7 +131,7 @@ def _parser():
     fit_parser.add_argument("--utc-offset", type=float, default=0.0)
 
     generate_parser = commands.add_parser(
-        "generate", help="generate jobs from profiles"
+        "generate", help="generate jobs from a workload profile"
     )
     generate_parser.add_argument("--profile", required=True, type=Path)
     generate_parser.add_argument("--out", required=True, type=Path)
@@ -142,6 +142,7 @@ def _parser():
     generate_parser.add_argument("--share", type=_share, default=1.0)
     generate_parser.add_argument("--nodes", type=_nodes, default=(1, None))
     generate_parser.add_argument("--spread", type=float, default=0.0)
+    generate_parser.add_argument("--jitter", type=float, default=600)
     generate_parser.add_argument("--gpu-fraction", type=float, default=0.5)
     generate_parser.add_argument("--requires")
     generate_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
@@ -274,22 +275,21 @@ def _prepare(args):
 
 
 def _fit(args):
-    profiles = fit_profiles(
+    profile = fit_profile(
         _traces(args.trace),
         trace_format=args.format,
         start=args.start,
         hours=args.hours,
         utc_offset_hours=args.utc_offset,
     )
-    write_profiles(profiles, args.out)
-    for source, profile in profiles.items():
-        print(f"jobs:{source}={profile['jobs']}")
-        for kind, typed in profile["types"].items():
-            print(f"days:{source}:{kind}={len(typed)}")
+    write_profile(profile, args.out)
+    print(f"jobs={profile['jobs']}")
+    for kind, streams in profile["types"].items():
+        print(f"days:{kind}={len(streams)}")
 
 
 def _generate(args):
-    profiles = read_profiles(args.profile)
+    profile = read_profile(args.profile)
     names = _names(args.platforms)
     volume = args.volume
     if args.load is not None:
@@ -297,19 +297,20 @@ def _generate(args):
         with tempfile.TemporaryDirectory() as directory:
             platforms = federation(directory, args.share, names=names)
         exposed = sum(platform.exposed_nodes for platform in platforms.values())
-        work = daily_node_hours(profiles, days=args.days, nodes=args.nodes)
+        work = daily_node_hours(profile, days=args.days, nodes=args.nodes)
         if work <= 0:
-            raise ValueError("the profiles generate no work under these settings")
+            raise ValueError("the profile generates no work under these settings")
         volume = args.load * exposed * 24 / work
         print(f"volume={volume:.4g}")
     jobs, summary = generate(
-        profiles,
+        profile,
         platforms=[PROFILES[name] for name in names],
         days=args.days,
         seed=args.seed,
         volume=volume,
         nodes=args.nodes,
         spread=args.spread,
+        jitter=args.jitter,
         bids=args.bids,
         gpu_fraction=args.gpu_fraction,
         requires=args.requires,

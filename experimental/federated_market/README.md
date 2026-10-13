@@ -21,12 +21,14 @@ python -m federated_market run --jobs jobs.csv --out results --share 0.1
 ```
 
 `prepare` turns traces into a jobs file with a bid on each platform. To draw new days
-instead, `fit` keeps each trace's days as light, medium or busy, and `generate` draws
-new days of the types you choose, at a chosen load and node range:
+instead, `fit` merges the traces into one stream and keeps their days as light, medium or
+busy, and `generate` draws new days of the types you choose, at a chosen load and node
+range:
 
 ```bash
-python -m federated_market fit --trace corona=corona.csv --out profiles.json
-python -m federated_market generate --profile profiles.json --out jobs.csv \
+python -m federated_market fit --trace corona=corona.csv --trace tioga=tioga.csv \
+  --out profile.json
+python -m federated_market generate --profile profile.json --out jobs.csv \
   --days light,busy,busy --nodes 1,10 --load 0.5 --share 0.1
 ```
 

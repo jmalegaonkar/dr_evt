@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""From raw traces or workload profiles to a job stream: interval, cleaning, ids, bids."""
+"""From raw traces or a workload profile to a job stream: interval, cleaning, ids, bids."""
 
 import math
 from numbers import Real
@@ -146,7 +146,7 @@ def prepare(
 
 
 def generate(
-    profiles,
+    profile,
     *,
     platforms,
     days=1,
@@ -154,24 +154,30 @@ def generate(
     volume=1.0,
     nodes=(1, None),
     spread=0.0,
+    jitter=600,
     bids="multi",
     gpu_fraction=0.5,
     requires=None,
 ) -> tuple[list[Job], dict[str, int]]:
-    """Generate deterministic jobs from workload profiles, one source per profile.
+    """Generate deterministic jobs from a workload profile.
 
-    Day types, arrays and run times follow `generated_rows`; hardware and bids follow
-    the same rules as `prepare`. Time 0 is midnight of the first day.
+    Day types, streams and refills follow `generated_rows`; hardware and bids follow the
+    same rules as `prepare`. Time 0 is midnight of the first day.
     """
     _check(bids, gpu_fraction)
-    rows, found = generated_rows(
-        profiles, days=days, seed=seed, volume=volume, nodes=nodes, spread=spread
+    rows, drawn = generated_rows(
+        profile,
+        days=days,
+        seed=seed,
+        volume=volume,
+        nodes=nodes,
+        spread=spread,
+        jitter=jitter,
     )
     summary = {"jobs": len(rows)}
-    for source in profiles:
-        summary[f"arrays:{source}"] = found[source]["arrays"]
+    for source in profile["sources"]:
         summary[f"jobs:{source}"] = sum(row.source == source for row in rows)
-        for kind in DAY_TYPES:
-            summary[f"days:{source}:{kind}"] = found[source]["days"].count(kind)
+    for kind in DAY_TYPES:
+        summary[f"days:{kind}"] = drawn.count(kind)
     jobs = _jobs(rows, 0, platforms, bids, seed, gpu_fraction, requires, summary)
     return jobs, summary

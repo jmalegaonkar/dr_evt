@@ -152,23 +152,20 @@ cannot run (Dane has no GPUs), and a single `bid` column with `--bids single`.
 
 ## 1.7 Generated days
 
-`fit` and `generate` make new days of jobs from a model of a trace, instead of the trace
-itself. `fit` reads traces and writes one profile per trace; `generate` draws days of
-jobs from profiles. Code: `jobs/workload.py` (`fit_profiles`, `generated_rows`,
+`fit` and `generate` make new days of jobs from a model of the traces, instead of the
+traces themselves. `fit` reads the traces and writes one profile; `generate` draws days of
+jobs from it. Code: `jobs/workload.py` (`fit_profile`, `generated_rows`,
 `daily_node_hours`) and `generate` in `jobs/prepare.py`. `tests/data/workload.json` is a
 small profile, made up by hand.
 
 **What a profile holds.**
 
-1. **Arrays.** Jobs of one node count submitted at most a minute apart form an array,
-   as a script sends them; most arrays are a single job. An array keeps its hour of the
-   day, read at `--utc-offset` from UTC, its node count, its number of jobs, its span
-   from first job to last, and up to nine quantiles of its jobs' log run times; an
-   array of equal jobs keeps one.
-2. **Day types.** The interval's whole days are split into thirds by the work they
-   hold: light, medium and busy. Each type keeps its days, each as its list of arrays.
-   The first and last days of a trace are often cut short, so only whole days count;
-   without an interval, the trace runs from its first submit to its last.
+1. **One stream.** The traces' jobs are merged into one stream, as the market sees them,
+   over the days that every trace covers in whole; without an interval, a trace runs
+   from its first submit to its last. Each job keeps its source, its second of the day,
+   read at `--utc-offset` from UTC, its node count and its run time.
+2. **Day types.** The days are split into thirds by the work they hold: light, medium
+   and busy. Each type keeps its days' streams.
 
 Users play no part, and a profile holds no job identity and no date.
 
@@ -176,40 +173,40 @@ Users play no part, and a profile holds no job identity and no date.
 
 1. **Its type.** `--days 10` draws ten days of random types; `--days light,busy,busy`
    gives the types, in order.
-2. **Its outline.** The day takes one of its type's real days, at random, as its
-   outline: which kinds of arrays arrive, and when.
-3. **Refills.** Each array of the outline is replaced by a random real array of the same
-   kind, from any day: the same quarter of the day, node class (1, 2-4, 5-16, 17-64 or
-   wider) and decade of work in node-hours. The refill arrives at its own hour, at a new
-   minute, and its jobs arrive over its real span, so arrays still arrive at once. Each
-   job draws a fresh run time from its array's quantiles, and the run time is also its
-   limit.
-4. **Then as usual.** The sources are merged by time, and ids, hardware and bids follow
-   as in 1.5, with each array one bidder. Day d starts at d x 86400 s, at midnight of
-   the profile's hours.
+2. **Its stream.** The day replays one of its type's streams, at random: every job
+   arrives from its source at its second. Bursts, one source's jobs at most a minute
+   apart, shift together by a random offset of up to `--jitter` seconds, so their
+   spacing stays as it was.
+3. **Refills.** Each job is refilled by a random real job of the same source and kind,
+   from any day: the same quarter of the day, node class (1, 2-4, 5-16, 17-64 or wider)
+   and decade of work in node-hours. It takes that job's node count and run time, and
+   the run time is also its limit.
+4. **Then as usual.** Ids, hardware and bids follow as in 1.5, with each burst one
+   bidder. Day d starts at d x 86400 s, at midnight of the profile's hours.
 
 **Settings.**
 
-- `--volume`: copies each array of the outline that many times on average; 2.5 makes
-  two copies, and a third half the time.
+- `--volume`: overlays that many streams of the type a day; 2.5 overlays two, and a
+  third with each of its jobs kept half the time.
 - `--load`: sets the volume so that the mean day's work, in node-hours at speed 1.0, is
   that fraction of the exposed nodes over 24 hours. The mean comes from the profile
   itself, not from sampled days.
-- `--spread`: varies each day's volume, log-normally, so that days stray further from
-  their outlines; 0 by default.
-- `--nodes LOW,HIGH`: refills come only from arrays in the range. An array outside it is
-  refilled by one inside, of the same quarter of the day and decade of work when there
-  is one, so a day keeps its arrivals; `--load` then sets how busy the days are.
-- `--seed`: fixes the days. The day types, outlines and copies come from their own
-  generator, so a node range leaves them as they are.
+- `--spread`: varies each day's volume, log-normally; 0 by default.
+- `--jitter`: how far a burst may shift, in seconds; 600 by default, and 0 replays the
+  seconds as they were.
+- `--nodes LOW,HIGH`: refills come only from jobs in the range. A job outside it is
+  stood in for by one inside, of its source, quarter of the day and decade of work when
+  there is one, at its own second; a day keeps its arrivals, and `--load` sets how busy
+  it is.
+- `--seed`: fixes the days. The types, streams and times come from their own generator,
+  so a node range leaves them as they are.
 
-The summary has `jobs`, and for each source `arrays:<source>`, `jobs:<source>` and
-`days:<source>:<type>`.
+The summary has `jobs`, `jobs:<source>` for each source and `days:<type>` for each type.
 
-Why this shape: arrays arrive as waves, and the waves are what queue, so the array is
-the unit, not the job. Days differ in what they hold, not only in how much: busy days
-hold heavier arrays, and a quiet day's few jobs are often long. A real outline keeps
-that, and refilling every array with another of its kind makes each day new.
+Why this shape: the market sees one stream, so the model is one stream, and a busy day is
+busy for the whole federation. Jobs arrive as scripts send them, in bursts of seconds,
+so every job keeps the second it arrived. Days differ in what they hold, not only in how
+much: refilling each job with another of its kind makes each day new and keeps its work.
 
 ## 1.8 Modelling choices
 
@@ -224,6 +221,6 @@ These choices are open to revision:
   drawn per job, with the same probability for every source.
 - **The request is only carried.** A job that ran past its request runs its recorded
   time.
-- **Generated days.** Arrays are jobs of one node count within a minute, day types are
-  thirds of the trace's days by work, and a refill matches the quarter of the day, node
-  class and decade of work. Each source draws its days on its own.
+- **Generated days.** A day's stream comes whole from a real day of its type, refills
+  match the source, quarter of the day, node class and decade of work, and bursts shift
+  by up to 10 minutes. Only days that every trace covers count.
