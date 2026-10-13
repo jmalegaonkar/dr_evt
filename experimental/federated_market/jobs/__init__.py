@@ -5,9 +5,27 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""Jobs: the record, the jobs file, and the preparation of real traces."""
+"""Jobs: the record, the jobs file, preparing traces, and generating workloads."""
 
 from .job import Job, read_jobs, write_jobs
-from .prepare import prepare
+from .prepare import generate, prepare
+from .workload import (
+    DAY_TYPES,
+    daily_node_hours,
+    fit_profiles,
+    read_profiles,
+    write_profiles,
+)
 
-__all__ = ["Job", "prepare", "read_jobs", "write_jobs"]
+__all__ = [
+    "DAY_TYPES",
+    "Job",
+    "daily_node_hours",
+    "fit_profiles",
+    "generate",
+    "prepare",
+    "read_jobs",
+    "read_profiles",
+    "write_jobs",
+    "write_profiles",
+]

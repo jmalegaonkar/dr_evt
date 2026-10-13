@@ -2,8 +2,8 @@
 
 A run ends with four files: a ledger of the winners, the jobs set aside, service by
 community, and a summary. This page gives each file field by field, with the fixture's
-run as the example, and the four commands that prepare traces, run a market, harvest
-its windows and train RegretFormer. The overview of all steps is `master_overview.md`.
+run as the example, and the six commands that prepare traces, fit and generate days,
+run a market, harvest its windows and train RegretFormer. The overview of all steps is `master_overview.md`.
 
 Code: `write_outputs`, `_service` and the records `RoutedJob`, `Waiting` and `_Service`
 in `market.py`, and `cli.py`.
@@ -132,12 +132,11 @@ an untrained network is fixed by its seed, and a trained one by its checkpoint.
 
 ## 7.7 The command line
 
-`python -m federated_market` has four commands. Each prints `key=value` lines, and an
+`python -m federated_market` has six commands. Each prints `key=value` lines, and an
 error ends it with status 2 and an `error:` line.
 
 **`prepare`** turns traces into a jobs file (step 1) and prints the preparation summary:
-rows read and kept, the drop counts, kept jobs per source, with `--synthetic` the groups
-and synthetic jobs per source, and jobs per persona.
+rows read and kept, the drop counts, kept jobs per source, and jobs per persona.
 
 | option | default | meaning |
 |---|---|---|
@@ -145,12 +144,38 @@ and synthetic jobs per source, and jobs per persona.
 | `--out` | required | the jobs file to write |
 | `--format` | `lc` | `lc` or `simple` |
 | `--start`, `--hours` | the whole trace | the interval, in the trace's clock |
-| `--seed` | 0 | the seed for hardware, bids and synthetic days |
+| `--seed` | 0 | the seed for hardware and bids |
 | `--gpu-fraction` | 0.5 | the chance that a job requires GPUs |
 | `--requires` | none | one hardware requirement for every job |
 | `--platforms` | all five | the platforms bid on |
 | `--bids` | `multi` | `multi`, a bid on each platform, or `single` |
-| `--synthetic` | off | draw one day from the interval instead |
+
+**`fit`** fits one workload profile to each trace (1.7 of step 1), writes them to
+`--out` as JSON, and prints each source's jobs and its days of each type.
+
+| option | default | meaning |
+|---|---|---|
+| `--trace NAME=PATH` | required, repeatable | a trace and its source label |
+| `--out` | required | the profiles file to write |
+| `--format` | `lc` | `lc` or `simple` |
+| `--start`, `--hours` | the whole trace | the interval, in the trace's clock |
+| `--utc-offset` | 0 | the hours from UTC at which to read the hours of the day |
+
+**`generate`** draws days of jobs from profiles (1.7 of step 1) into a jobs file and
+prints its summary: the jobs, the arrays and jobs per source, the days of each type,
+and the jobs per persona. With `--load`, it first prints the volume it chose.
+
+| option | default | meaning |
+|---|---|---|
+| `--profile`, `--out` | required | the profiles file and the jobs file to write |
+| `--days` | 1 | a number of days of random types, or the types, such as `light,busy,busy` |
+| `--seed` | 0 | the seed for the days, hardware and bids |
+| `--volume` | 1.0 | copies of each array of an outline, on average |
+| `--load` | none | choose the volume so that a mean day's work is this share of the exposed nodes over 24 hours |
+| `--share`, `--platforms` | 1.0, all five | the federation whose exposed nodes `--load` counts, and the platforms bid on |
+| `--nodes LOW,HIGH` | all | refill only from arrays in this node range |
+| `--spread` | 0 | the log-normal variation of each day's volume |
+| `--gpu-fraction`, `--requires`, `--bids` | as for `prepare` | hardware and bids |
 
 **`run`** routes a jobs file through one mechanism and writes the four files to `--out`,
 and nothing else: dr_evt's input files go to a temporary directory. It prints the

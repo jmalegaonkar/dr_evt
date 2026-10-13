@@ -55,10 +55,12 @@ Code: `jobs/traces.py` (`read_lc`, `read_simple`) and `jobs/prepare.py` (`prepar
   that is, on a machine of speed 1.0.
 - **Source.** The trace a job comes from is a community label for analysis. It does
   not choose a platform or the job's hardware.
-- **Synthetic days.** With `--synthetic`, the interval becomes a pool instead of the day
-  itself. For each source, a Poisson number of real groups (arrays, or single jobs),
-  with the source's mean per day, is drawn at random, and each group arrives at its real
-  time of day. Each seed gives a new day.
+- **Generated days.** Instead of a trace, `fit` keeps each trace's days as light, medium
+  or busy, each a list of arrays: jobs of one node count sent within a minute. `generate`
+  draws new days: a day of a chosen type takes one of that type's real days as its
+  outline, and refills each array with a real array of the same kind. `--days` lists the
+  types, `--load` sets the mean daily load, and `--nodes` keeps the arrays to a node
+  range.
 
 ## 2. Bids: the synthetic willingness to pay
 
@@ -201,6 +203,7 @@ Code: `market.py` (`write_outputs`) and `cli.py`. Details: `07_outputs.md`.
   of charges), the subsidy (the federation's part of it), the counts, and the SHA-256
   digest of `routed.csv`.
 
-The commands are `python -m federated_market prepare` (traces to a jobs file), `run` (a
-jobs file through one mechanism), `harvest` (the windows of runs under several
-mechanisms, to a file) and `train` (RegretFormer on harvested windows).
+The commands are `python -m federated_market prepare` (traces to a jobs file), `fit`
+(traces to workload profiles), `generate` (profiles to a jobs file), `run` (a jobs file
+through one mechanism), `harvest` (the windows of runs under several mechanisms, to a
+file) and `train` (RegretFormer on harvested windows).

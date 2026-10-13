@@ -3,7 +3,8 @@
 Step 1 turns raw traces into the job stream that the market runs. It reads each trace,
 merges the sources on one clock, keeps one interval, drops the rows that cannot be
 simulated, and writes one row per job. The bids that the same pass attaches are step 2.
-The overview of all steps is `master_overview.md`.
+Instead of a trace, the jobs can come from days generated from a model of it (1.7). The
+overview of all steps is `master_overview.md`.
 
 Code: `jobs/traces.py` (`read_lc`, `read_simple`), `jobs/prepare.py` (`prepare`,
 `_drop_reason`) and `jobs/job.py` (`Job`, `read_jobs`, `write_jobs`). The command is
@@ -149,34 +150,66 @@ Each limit is the run time: j000001 asked for 120 s and ran 40 s. The bids are s
 (`02_bids.md`): by default one `bid:<platform>` column per platform, empty where the job
 cannot run (Dane has no GPUs), and a single `bid` column with `--bids single`.
 
-## 1.7 Synthetic days
+## 1.7 Generated days
 
-With `synthetic=True` (`--synthetic`), `prepare` returns one day drawn from the interval
-instead of the interval itself: the jobs are real, but the day's mix is new, and each
-seed draws another day. The interval is the pool, typically a busy stretch of whole
-days.
+`fit` and `generate` make new days of jobs from a model of a trace, instead of the trace
+itself. `fit` reads traces and writes one profile per trace; `generate` draws days of
+jobs from profiles. Code: `jobs/workload.py` (`fit_profiles`, `generated_rows`,
+`daily_node_hours`) and `generate` in `jobs/prepare.py`. `tests/data/workload.json` is a
+small profile, made up by hand.
 
-1. **Groups.** Each source's cleaned jobs are split into groups: jobs one user submitted
-   less than a minute apart. Most groups are a single job; the rest are arrays, often
-   many copies of one job.
-2. **How many.** For each source, the number of groups in the day is drawn from a
-   Poisson distribution whose mean is the source's groups per day in the interval.
-3. **Which and when.** That many groups are drawn at random from the source, each at
-   most once, and each arrives at the time of day it really arrived, counted from the
-   interval's start. A start at midnight gives clock times.
+**What a profile holds.**
+
+1. **Arrays.** Jobs of one node count submitted at most a minute apart form an array,
+   as a script sends them; most arrays are a single job. An array keeps its hour of the
+   day, read at `--utc-offset` from UTC, its node count, its number of jobs, its span
+   from first job to last, and up to nine quantiles of its jobs' log run times; an
+   array of equal jobs keeps one.
+2. **Day types.** The interval's whole days are split into thirds by the work they
+   hold: light, medium and busy. Each type keeps its days, each as its list of arrays.
+   The first and last days of a trace are often cut short, so only whole days count;
+   without an interval, the trace runs from its first submit to its last.
+
+Users play no part, and a profile holds no job identity and no date.
+
+**How a day is drawn.**
+
+1. **Its type.** `--days 10` draws ten days of random types; `--days light,busy,busy`
+   gives the types, in order.
+2. **Its outline.** The day takes one of its type's real days, at random, as its
+   outline: which kinds of arrays arrive, and when.
+3. **Refills.** Each array of the outline is replaced by a random real array of the same
+   kind, from any day: the same quarter of the day, node class (1, 2-4, 5-16, 17-64 or
+   wider) and decade of work in node-hours. The refill arrives at its own hour, at a new
+   minute, and its jobs arrive over its real span, so arrays still arrive at once. Each
+   job draws a fresh run time from its array's quantiles, and the run time is also its
+   limit.
 4. **Then as usual.** The sources are merged by time, and ids, hardware and bids follow
-   as for a real interval.
+   as in 1.5, with each array one bidder. Day d starts at d x 86400 s, at midnight of
+   the profile's hours.
 
-Groups matter because arrays arrive as waves, and the waves are what queue: drawing
-single jobs at a Poisson rate spreads each array over the day. The times of day carry
-each source's daily pattern, so no curve has to be fitted.
+**Settings.**
 
-- The seed fixes the day: each source draws from a generator keyed by the seed and the
-  source.
-- A job appears at most once in a day, so it keeps its identity, and with it its
-  hardware and bid draws.
-- The summary adds, for each source, `groups:<source>` in the interval and
-  `synthetic:<source>` jobs in the day; `kept` still counts the interval's jobs.
+- `--volume`: copies each array of the outline that many times on average; 2.5 makes
+  two copies, and a third half the time.
+- `--load`: sets the volume so that the mean day's work, in node-hours at speed 1.0, is
+  that fraction of the exposed nodes over 24 hours. The mean comes from the profile
+  itself, not from sampled days.
+- `--spread`: varies each day's volume, log-normally, so that days stray further from
+  their outlines; 0 by default.
+- `--nodes LOW,HIGH`: refills come only from arrays in the range. An array outside it is
+  refilled by one inside, of the same quarter of the day and decade of work when there
+  is one, so a day keeps its arrivals; `--load` then sets how busy the days are.
+- `--seed`: fixes the days. The day types, outlines and copies come from their own
+  generator, so a node range leaves them as they are.
+
+The summary has `jobs`, and for each source `arrays:<source>`, `jobs:<source>` and
+`days:<source>:<type>`.
+
+Why this shape: arrays arrive as waves, and the waves are what queue, so the array is
+the unit, not the job. Days differ in what they hold, not only in how much: busy days
+hold heavier arrays, and a quiet day's few jobs are often long. A real outline keeps
+that, and refilling every array with another of its kind makes each day new.
 
 ## 1.8 Modelling choices
 
@@ -191,6 +224,6 @@ These choices are open to revision:
   drawn per job, with the same probability for every source.
 - **The request is only carried.** A job that ran past its request runs its recorded
   time.
-- **Synthetic days.** Groups are jobs one user submitted within a minute of each other.
-  Their number per day is Poisson, for each source on its own, and each keeps its time
-  of day.
+- **Generated days.** Arrays are jobs of one node count within a minute, day types are
+  thirds of the trace's days by work, and a refill matches the quarter of the day, node
+  class and decade of work. Each source draws its days on its own.

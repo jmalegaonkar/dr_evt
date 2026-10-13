@@ -20,11 +20,20 @@ python -m federated_market prepare --trace corona=corona.csv --trace tioga=tioga
 python -m federated_market run --jobs jobs.csv --out results --share 0.1
 ```
 
-`prepare` turns traces into a jobs file with a bid on each platform; with `--synthetic`
-it draws a new day from the interval instead. `run` routes the jobs through one
-mechanism, `vcg`, `firstprice`, `firstfit` or `regretformer`, and writes `routed.csv`,
-`waiting.csv`, `service.csv` and `summary.json`. With `--aging`, a waiting job's bids
-rise every 10 minutes, and the federation pays that credit.
+`prepare` turns traces into a jobs file with a bid on each platform. To draw new days
+instead, `fit` keeps each trace's days as light, medium or busy, and `generate` draws
+new days of the types you choose, at a chosen load and node range:
+
+```bash
+python -m federated_market fit --trace corona=corona.csv --out profiles.json
+python -m federated_market generate --profile profiles.json --out jobs.csv \
+  --days light,busy,busy --nodes 1,10 --load 0.5 --share 0.1
+```
+
+`run` routes the jobs through one mechanism, `vcg`, `firstprice`, `firstfit` or
+`regretformer`, and writes `routed.csv`, `waiting.csv`, `service.csv` and
+`summary.json`. With `--aging`, a waiting job's bids rise every 10 minutes, and the
+federation pays that credit.
 
 To train RegretFormer, harvest windows from market runs, then train on them wherever
 torch runs; training needs neither dr_evt nor the traces:
@@ -46,12 +55,12 @@ for that interpreter under the install prefix (`lib/python` or `lib64/python`) o
 
 | path | what it holds |
 |---|---|
-| `jobs/` | the job record and jobs file, the trace readers, the persona bids, preparation and synthetic days |
+| `jobs/` | the job record and jobs file, the trace readers, the persona bids, preparation, and the workload model that fits and generates days |
 | `platforms.py` | a platform over one dr_evt simulation, the five machines, and `federation` |
 | `mechanism/` | the mechanism contract, VCG and the affine maximizer, pay what you bid, FirstFit, and RegretFormer with its training and regret estimates |
 | `market.py` | the window loop, its checks, and the output files |
 | `harvest.py` | windows recorded from market runs, and the files that carry them to training |
-| `cli.py` | the four commands |
+| `cli.py` | the six commands |
 | `tests/` | the suite, with a small trace and jobs file in `tests/data/` |
 | `learn/` | the guides and the fixture notebook |
 

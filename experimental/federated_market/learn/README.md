@@ -1,7 +1,7 @@
 # Market guides and notebooks
 
 `master_overview.md` walks through the market end to end, and one page details each
-step: `01_jobs.md`, from traces to the jobs file; `02_bids.md`, the bids;
+step: `01_jobs.md`, from traces, or days generated from them, to the jobs file; `02_bids.md`, the bids;
 `03_platforms.md`, the platforms; `04_offers.md`, candidates and offers, with one window
 followed call by call under all four mechanisms; `05_loop.md`, the market loop and
 aging, with the fixture's run window by window; `06_mechanisms.md`, the mechanisms, with

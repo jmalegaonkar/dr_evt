@@ -5,7 +5,7 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""The command line: prepare traces, run a market, harvest windows, train."""
+"""The command line: prepare or generate jobs, run a market, harvest windows, train."""
 
 import argparse
 import sys
@@ -13,7 +13,17 @@ import tempfile
 from pathlib import Path
 
 from .harvest import harvest, read_windows, write_windows
-from .jobs import prepare, read_jobs, write_jobs
+from .jobs import (
+    DAY_TYPES,
+    daily_node_hours,
+    fit_profiles,
+    generate,
+    prepare,
+    read_jobs,
+    read_profiles,
+    write_jobs,
+    write_profiles,
+)
 from .market import run, write_outputs
 from .mechanism import MECHANISMS, train_regretformer
 from .platforms import DEFAULT_FEDERATION, PROFILES, federation
@@ -37,6 +47,26 @@ def _share(value):
                 f"invalid platform share {item!r}"
             ) from error
     return shares
+
+
+def _days(value):
+    """Parse a number of days of random types, or day types such as light,busy."""
+    if value.isdigit():
+        return int(value)
+    kinds = value.split(",")
+    unknown = next((kind for kind in kinds if kind not in DAY_TYPES), None)
+    if unknown is not None:
+        raise argparse.ArgumentTypeError(f"unknown day type {unknown!r}")
+    return kinds
+
+
+def _nodes(value):
+    """Parse a node range, LOW,HIGH."""
+    try:
+        low, high = (int(item) for item in value.split(","))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"invalid node range {value!r}") from error
+    return low, high
 
 
 def _parser():
@@ -91,7 +121,31 @@ def _parser():
     prepare_parser.add_argument("--requires")
     prepare_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
     prepare_parser.add_argument("--bids", choices=("multi", "single"), default="multi")
-    prepare_parser.add_argument("--synthetic", action="store_true")
+
+    fit_parser = commands.add_parser("fit", help="fit workload profiles to traces")
+    fit_parser.add_argument("--trace", action="append", required=True)
+    fit_parser.add_argument("--out", required=True, type=Path)
+    fit_parser.add_argument("--format", choices=("lc", "simple"), default="lc")
+    fit_parser.add_argument("--start", type=float)
+    fit_parser.add_argument("--hours", type=float)
+    fit_parser.add_argument("--utc-offset", type=float, default=0.0)
+
+    generate_parser = commands.add_parser(
+        "generate", help="generate jobs from profiles"
+    )
+    generate_parser.add_argument("--profile", required=True, type=Path)
+    generate_parser.add_argument("--out", required=True, type=Path)
+    generate_parser.add_argument("--days", type=_days, default=1)
+    generate_parser.add_argument("--seed", type=int, default=0)
+    generate_parser.add_argument("--volume", type=float, default=1.0)
+    generate_parser.add_argument("--load", type=float)
+    generate_parser.add_argument("--share", type=_share, default=1.0)
+    generate_parser.add_argument("--nodes", type=_nodes, default=(1, None))
+    generate_parser.add_argument("--spread", type=float, default=0.0)
+    generate_parser.add_argument("--gpu-fraction", type=float, default=0.5)
+    generate_parser.add_argument("--requires")
+    generate_parser.add_argument("--platforms", default=",".join(DEFAULT_FEDERATION))
+    generate_parser.add_argument("--bids", choices=("multi", "single"), default="multi")
     return parser
 
 
@@ -192,15 +246,19 @@ def _train(args):
         print(f"{key}={sum(last) / len(last):.6g}")
 
 
-def _prepare(args):
+def _traces(items):
     traces = {}
-    for item in args.trace:
+    for item in items:
         if "=" not in item:
             raise ValueError(f"trace must be name=path: {item!r}")
         name, path = item.split("=", 1)
         traces[name] = Path(path)
+    return traces
+
+
+def _prepare(args):
     jobs, summary = prepare(
-        traces,
+        _traces(args.trace),
         platforms=[PROFILES[name] for name in _names(args.platforms)],
         bids=args.bids,
         trace_format=args.format,
@@ -209,7 +267,52 @@ def _prepare(args):
         seed=args.seed,
         gpu_fraction=args.gpu_fraction,
         requires=args.requires,
-        synthetic=args.synthetic,
+    )
+    write_jobs(jobs, args.out)
+    for key, value in summary.items():
+        print(f"{key}={value}")
+
+
+def _fit(args):
+    profiles = fit_profiles(
+        _traces(args.trace),
+        trace_format=args.format,
+        start=args.start,
+        hours=args.hours,
+        utc_offset_hours=args.utc_offset,
+    )
+    write_profiles(profiles, args.out)
+    for source, profile in profiles.items():
+        print(f"jobs:{source}={profile['jobs']}")
+        for kind, typed in profile["types"].items():
+            print(f"days:{source}:{kind}={len(typed)}")
+
+
+def _generate(args):
+    profiles = read_profiles(args.profile)
+    names = _names(args.platforms)
+    volume = args.volume
+    if args.load is not None:
+        # The day's work, in node-hours at speed 1.0, against the exposed nodes.
+        with tempfile.TemporaryDirectory() as directory:
+            platforms = federation(directory, args.share, names=names)
+        exposed = sum(platform.exposed_nodes for platform in platforms.values())
+        work = daily_node_hours(profiles, days=args.days, nodes=args.nodes)
+        if work <= 0:
+            raise ValueError("the profiles generate no work under these settings")
+        volume = args.load * exposed * 24 / work
+        print(f"volume={volume:.4g}")
+    jobs, summary = generate(
+        profiles,
+        platforms=[PROFILES[name] for name in names],
+        days=args.days,
+        seed=args.seed,
+        volume=volume,
+        nodes=args.nodes,
+        spread=args.spread,
+        bids=args.bids,
+        gpu_fraction=args.gpu_fraction,
+        requires=args.requires,
     )
     write_jobs(jobs, args.out)
     for key, value in summary.items():
@@ -219,7 +322,14 @@ def _prepare(args):
 def main(argv=None) -> int:
     """Parse arguments, run the selected command, and return its status."""
     args = _parser().parse_args(argv)
-    commands = {"prepare": _prepare, "run": _run, "harvest": _harvest, "train": _train}
+    commands = {
+        "prepare": _prepare,
+        "fit": _fit,
+        "generate": _generate,
+        "run": _run,
+        "harvest": _harvest,
+        "train": _train,
+    }
     try:
         commands[args.command](args)
     except (ImportError, ValueError) as error:

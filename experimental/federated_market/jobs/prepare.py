@@ -5,15 +5,15 @@
 #         SPDX-License-Identifier: MIT                                         #
 ################################################################################
 
-"""From raw traces to a job stream: interval, cleaning, ids, bids."""
+"""From raw traces or workload profiles to a job stream: interval, cleaning, ids, bids."""
 
 import math
 from numbers import Real
 
 from .bids import PERSONAS, generator, multi_bid, single_bid, terms
 from .job import Job
-from .synthetic import synthesize
 from .traces import read_lc, read_simple
+from .workload import DAY_TYPES, generated_rows
 
 
 def _drop_reason(row):
@@ -41,6 +41,50 @@ def _bid(record, job_terms, usable, hardware, bids, seed):
     return single_bid(job_terms, level / len(usable))
 
 
+def _check(bids, gpu_fraction):
+    if bids not in {"single", "multi"}:
+        raise ValueError("bids must be 'single' or 'multi'")
+    if (
+        isinstance(gpu_fraction, bool)
+        or not isinstance(gpu_fraction, Real)
+        or not 0 <= gpu_fraction <= 1
+    ):
+        raise ValueError("gpu_fraction must be a number in [0, 1]")
+
+
+def _jobs(records, origin, platforms, bids, seed, gpu_fraction, requires, summary):
+    """Number the records and give each its hardware and bid; count the personas."""
+    summary.update({f"persona:{name}": 0 for name in PERSONAS})
+    override = None if requires is None else frozenset(requires.split())
+    jobs = []
+    for index, record in enumerate(records, start=1):
+        job_rng = generator(seed, record.source, record.identity)
+        # The hardware draw comes first and is always made, so neither an override
+        # nor the bid rule moves any other draw.
+        gpu = job_rng.random() < gpu_fraction
+        needs = override if override is not None else frozenset({"gpu"} if gpu else ())
+        job_terms = terms(seed, record.source, record.user, job_rng)
+        usable = [item for item in platforms if needs <= item.hardware]
+        hardware = "gpu" if "gpu" in needs else "cpu"
+        jobs.append(
+            Job(
+                f"j{index:06d}",
+                record.submit - origin,
+                record.nodes,
+                record.limit if record.runtime is None else record.runtime,
+                _bid(record, job_terms, usable, hardware, bids, seed),
+                needs,
+                record.runtime,
+                record.limit,
+                record.source,
+                record.user or "",
+                job_terms.persona,
+            )
+        )
+        summary[f"persona:{job_terms.persona}"] += 1
+    return jobs
+
+
 def prepare(
     traces,
     *,
@@ -52,26 +96,17 @@ def prepare(
     seed=0,
     gpu_fraction=0.5,
     requires=None,
-    synthetic=False,
 ) -> tuple[list[Job], dict[str, int]]:
     """Prepare deterministic jobs from one interval across named traces.
 
     `platforms` are the profiles bid on, each with a `name`, a posted
     `price_per_node_hour`, its `hardware` and its `speed`. `bids` is "multi", a bid
-    on each platform, or "single", one bid for all. With `synthetic`, the jobs are one
-    day drawn from the interval instead.
+    on each platform, or "single", one bid for all.
     """
     readers = {"lc": read_lc, "simple": read_simple}
     if trace_format not in readers:
         raise ValueError("trace_format must be 'lc' or 'simple'")
-    if bids not in {"single", "multi"}:
-        raise ValueError("bids must be 'single' or 'multi'")
-    if (
-        isinstance(gpu_fraction, bool)
-        or not isinstance(gpu_fraction, Real)
-        or not 0 <= gpu_fraction <= 1
-    ):
-        raise ValueError("gpu_fraction must be a number in [0, 1]")
+    _check(bids, gpu_fraction)
     reader = readers[trace_format]
     records = []
     for source, path in traces.items():
@@ -105,41 +140,38 @@ def prepare(
         else:
             summary[reason] += 1
     summary["kept"] = len(kept)
-    if synthetic:
-        last = max((row.submit for row in selected), default=lower)
-        end = upper if upper < math.inf else last + 1
-        kept, found = synthesize(kept, lower, end, seed)
-        for source in traces:
-            summary[f"groups:{source}"] = found.get(source, 0)
-            summary[f"synthetic:{source}"] = sum(row.source == source for row in kept)
-    summary.update({f"persona:{name}": 0 for name in PERSONAS})
-
     origin = kept[0].submit if kept else 0
-    override = None if requires is None else frozenset(requires.split())
-    jobs = []
-    for index, record in enumerate(kept, start=1):
-        job_rng = generator(seed, record.source, record.identity)
-        # The hardware draw comes first and is always made, so neither an override
-        # nor the bid rule moves any other draw.
-        gpu = job_rng.random() < gpu_fraction
-        needs = override if override is not None else frozenset({"gpu"} if gpu else ())
-        job_terms = terms(seed, record.source, record.user, job_rng)
-        usable = [item for item in platforms if needs <= item.hardware]
-        hardware = "gpu" if "gpu" in needs else "cpu"
-        jobs.append(
-            Job(
-                f"j{index:06d}",
-                record.submit - origin,
-                record.nodes,
-                record.limit if record.runtime is None else record.runtime,
-                _bid(record, job_terms, usable, hardware, bids, seed),
-                needs,
-                record.runtime,
-                record.limit,
-                record.source,
-                record.user or "",
-                job_terms.persona,
-            )
-        )
-        summary[f"persona:{job_terms.persona}"] += 1
+    jobs = _jobs(kept, origin, platforms, bids, seed, gpu_fraction, requires, summary)
+    return jobs, summary
+
+
+def generate(
+    profiles,
+    *,
+    platforms,
+    days=1,
+    seed=0,
+    volume=1.0,
+    nodes=(1, None),
+    spread=0.0,
+    bids="multi",
+    gpu_fraction=0.5,
+    requires=None,
+) -> tuple[list[Job], dict[str, int]]:
+    """Generate deterministic jobs from workload profiles, one source per profile.
+
+    Day types, arrays and run times follow `generated_rows`; hardware and bids follow
+    the same rules as `prepare`. Time 0 is midnight of the first day.
+    """
+    _check(bids, gpu_fraction)
+    rows, found = generated_rows(
+        profiles, days=days, seed=seed, volume=volume, nodes=nodes, spread=spread
+    )
+    summary = {"jobs": len(rows)}
+    for source in profiles:
+        summary[f"arrays:{source}"] = found[source]["arrays"]
+        summary[f"jobs:{source}"] = sum(row.source == source for row in rows)
+        for kind in DAY_TYPES:
+            summary[f"days:{source}:{kind}"] = found[source]["days"].count(kind)
+    jobs = _jobs(rows, 0, platforms, bids, seed, gpu_fraction, requires, summary)
     return jobs, summary

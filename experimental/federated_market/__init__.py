@@ -8,7 +8,17 @@
 """A federation market over DR_EVT: five platforms, a job stream, an auction."""
 
 from .harvest import harvest, read_windows, record_windows, write_windows
-from .jobs import Job, prepare, read_jobs, write_jobs
+from .jobs import (
+    Job,
+    daily_node_hours,
+    fit_profiles,
+    generate,
+    prepare,
+    read_jobs,
+    read_profiles,
+    write_jobs,
+    write_profiles,
+)
 from .market import MarketError, Result, RoutedJob, Waiting, run, write_outputs
 from .mechanism import (
     Affine,
@@ -62,18 +72,23 @@ __all__ = [
     "PLATFORMS",
     "PROFILES",
     "candidates",
+    "daily_node_hours",
     "federation",
+    "fit_profiles",
+    "generate",
     "grid_regret",
     "harvest",
     "offers",
     "prepare",
     "read_jobs",
+    "read_profiles",
     "read_windows",
     "record_windows",
     "refined_regret",
     "run",
     "train_regretformer",
     "write_outputs",
+    "write_profiles",
     "write_jobs",
     "write_windows",
 ]
