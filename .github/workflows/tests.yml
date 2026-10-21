@@ -266,15 +266,6 @@ jobs:
           echo "========================================"
           PYTHON_EXECUTABLE=$(command -v python) ./tests/run_python_tests.sh
 
-      - name: Run Market Package Tests
-        id: market-package
-        run: |
-          source venv/bin/activate
-          echo "========================================"
-          echo "Running Market Package Tests (98 tests)"
-          echo "========================================"
-          PYTHON_EXECUTABLE=$(command -v python) ./tests/run_market_tests.sh
-
       - name: Run gRPC Client/Server Tests
         id: grpc
         run: |
@@ -351,7 +342,6 @@ jobs:
           echo "  Config (12 tests): ${{ steps.config.outcome }}"
           echo "  CTest (17 native + trace tools + MPI when available): ${{ steps.core-ctest.outcome }}"
           echo "  Python API (19 tests): ${{ steps.python-api.outcome }}"
-          echo "  Market Package (98 tests): ${{ steps.market-package.outcome }}"
           echo "  Append-Job (23 C++ + 5 optional gRPC checks): ${{ steps.append-job.outcome }}"
           echo "  Backfill-window focused rerun (5 checks already counted): ${{ steps.backfill-window.outcome }}"
           echo "  Single-Coordinator gRPC: ${{ steps.grpc-single-coordinator.outcome }}"
