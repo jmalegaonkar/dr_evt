@@ -35,7 +35,8 @@ python -m federated_market generate --profile profile.json --out jobs.csv \
 `run` routes the jobs through one mechanism, `vcg`, `firstprice`, `firstfit` or
 `regretformer`, and writes `routed.csv`, `waiting.csv`, `service.csv` and
 `summary.json`. With `--aging`, a waiting job's bids rise every 10 minutes, and the
-federation pays that credit.
+federation pays that credit. With `--no-under-price`, a bid under a platform's price is
+no offer there, and nodes nobody else wants stay free for the next window.
 
 To train RegretFormer, harvest windows from market runs, then train on them wherever
 torch runs; training needs neither dr_evt nor the traces:

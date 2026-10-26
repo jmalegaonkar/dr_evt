@@ -138,7 +138,8 @@ Code: `market.py` (`run`, `_check_decisions`, `_blocked_by`). Details: `05_loop.
 
 1. **Intake.** A job that could never run on this federation waits outside the
    auction, with its reason: no platform has its `hardware`, it is `oversize` for every
-   share, or it bid on no platform that fits it (`no_bid`). It ends the run in
+   share, or it bid on no platform that fits it (`no_bid`); without `under_price`, also
+   a job whose bids could never cover a price (`under_price`). It ends the run in
    `waiting.csv`.
 2. **Each window,** at `t = 0, 30, 60, ...`: advance every platform to `t`, admit the
    jobs that have arrived, read the free nodes, and form the batch: the first 32 queued

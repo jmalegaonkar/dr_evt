@@ -25,7 +25,8 @@ Code: `mechanism/base.py` (`job_value`, `candidates`, `offers`, `Mechanism`,
 - `offers(job, platforms, free)` keeps the candidates the job bid on, at any price, as
   `{machine: (cost, value)}`. A bid of zero or less is no bid.
 - An offer whose value is under its cost is a bid **under the price**. It can win too,
-  and the job then pays its whole bid. An offer whose value equals its cost, within
+  and the job then pays its whole bid. The market can turn this off (`under_price`, step
+  5), and then drops such bids before each auction. An offer whose value equals its cost, within
   `TOLERANCE` (1e-9), is at the price, not under it.
 
 ## 4.3 The mechanism contract

@@ -134,9 +134,10 @@ def _credit(job, t, aging, aging_cap) -> float:
     return min(aging * ((t - job.submit_s) // _AGING_PERIOD_S), aging_cap)
 
 
-def _aged(job, platforms, credit):
-    """Return the job with its credit added to its value on each platform it bid on."""
-    if credit <= 0:
+def _offered(job, platforms, credit, under_price):
+    """Return the job as an auction sees it: its credit added to its value on each
+    platform it bid on, and without `under_price`, no bid under a platform's price."""
+    if credit <= 0 and under_price:
         return job
     bid = {}
     for name, platform in platforms.items():
@@ -147,11 +148,15 @@ def _aged(job, platforms, credit):
             speed = platform.job_speed(job)
             node_hours = job.num_nodes * job.limit_s / speed / 3600
             scale = 1.0 if isinstance(job.bid, dict) else speed
-            bid[name] = price * scale + credit / node_hours
+            offered = price * scale + credit / node_hours
+            if under_price or offered * node_hours + TOLERANCE >= platform.cost(job):
+                bid[name] = offered
     return replace(job, bid=bid)
 
 
-def _configuration(platforms, mechanism, window_s, prefix, max_prefix, aging, cap):
+def _configuration(
+    platforms, mechanism, window_s, prefix, max_prefix, aging, cap, under_price
+):
     return {
         "mechanism": mechanism.name,
         "window_s": window_s,
@@ -159,6 +164,7 @@ def _configuration(platforms, mechanism, window_s, prefix, max_prefix, aging, ca
         "max_prefix": max_prefix,
         "aging": aging,
         "aging_cap": cap,
+        "under_price": under_price,
         "platforms": {
             name: {
                 "total_nodes": platform.total_nodes,
@@ -192,6 +198,7 @@ def run(
     max_prefix: int = 256,
     aging: float = 0.0,
     aging_cap: float = 1.0,
+    under_price: bool = True,
 ) -> Result:
     """Route an arrival stream through fixed market windows.
 
@@ -199,6 +206,10 @@ def run(
     on each platform it bid on, up to `aging_cap` in all: the same credit for every
     job, whatever its size. The federation pays it: the platform gets the whole
     charge, and the job pays the charge less its credit, never below zero.
+
+    With `under_price`, a bid under a platform's price is an offer there too, and wins
+    only nodes the auctions leave free, paying its whole bid. Without it, such a bid
+    is no offer: the nodes stay free for the next window.
     """
     for name, value in (
         ("window_s", window_s),
@@ -222,6 +233,14 @@ def run(
         # Nothing is turned away. A job that no platform could run even idle, or
         # that bid on none that could, waits outside the auction until the run ends.
         reason = _blocked_by(job, platforms, full, mechanism)
+        if reason is None and not under_price:
+            # A job whose bids could never cover a price, even with all the credit
+            # aging can give it, would wait in the queue forever.
+            most = aging_cap if aging > 0 else 0.0
+            if not mechanism.offers(
+                _offered(job, platforms, most, False), platforms, full
+            ):
+                reason = "under_price"
         if reason is None:
             arrivals.append(job)
         else:
@@ -245,7 +264,7 @@ def run(
         # The window opens on public facts: the first jobs that can be placed now,
         # whatever they bid. Later jobs get only the nodes its auctions leave free.
         able = [
-            _aged(job, platforms, _credit(job, t, aging, aging_cap))
+            _offered(job, platforms, _credit(job, t, aging, aging_cap), under_price)
             for job in queue
             if candidates(job, platforms, free)
         ]
@@ -298,7 +317,14 @@ def run(
         waiting,
         statistics,
         _configuration(
-            platforms, mechanism, window_s, prefix, max_prefix, aging, aging_cap
+            platforms,
+            mechanism,
+            window_s,
+            prefix,
+            max_prefix,
+            aging,
+            aging_cap,
+            under_price,
         ),
         {job.job_id: (job.source, job.num_nodes) for job in ordered},
     )

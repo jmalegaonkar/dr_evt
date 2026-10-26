@@ -62,9 +62,10 @@ Corona's price and pays its whole bid. The file holds full precision; this table
 ## 7.3 Jobs set aside, `waiting.csv`
 
 A job that could never run on the federation waits outside the auction for the whole run
-(step 5), with its submit time and one of three reasons: `hardware` when no platform has
-its hardware, `oversize` when it fits no slice, and `no_bid` when it bid on no platform
-that could run it. Every other job runs: the loop ends only when the queue is empty. The
+(step 5), with its submit time and its reason: `hardware` when no platform has its
+hardware, `oversize` when it fits no slice, `no_bid` when it bid on no platform that
+could run it, and, without `under_price`, `under_price` when no bid could ever cover a
+price. Every other job runs: the loop ends only when the queue is empty. The
 fixture sets aside one job:
 
 | job_id | reason | submit_s |
@@ -107,8 +108,8 @@ node-hours.
 ## 7.5 The summary, `summary.json`
 
 - `configuration`: the mechanism's name, `window_s`, `prefix`, `max_prefix`, `aging`,
-  `aging_cap`, and for each platform its total and exposed nodes, posted price, hardware
-  and speeds.
+  `aging_cap`, `under_price`, and for each platform its total and exposed nodes, posted
+  price, hardware and speeds.
 - `service`: the rows of `service.csv`, keyed by community.
 - `statistics`: what each platform's dr_evt simulation measured. `jobs_completed`;
   `makespan`, the platform's latest completion time, counted from 0; and `utilization`,
@@ -192,6 +193,7 @@ ledger's digest.
 | `--window` | 30 | the window length in seconds |
 | `--aging` | 0, off | the credit a waiting job's value gains on each platform it bid on, for every 10 minutes it waits (step 5) |
 | `--aging-cap` | 1.0 | the most credit a job can earn |
+| `--under-price`, `--no-under-price` | on | whether a bid under a platform's price is an offer there (step 5) |
 | `--mechanism` | `vcg` | `vcg`, `firstprice`, `firstfit` or `regretformer` |
 | `--checkpoint` | none | the saved network, required for `regretformer` |
 | `--platforms` | all five | the federation |

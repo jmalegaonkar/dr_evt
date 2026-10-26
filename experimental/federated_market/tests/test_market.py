@@ -322,6 +322,44 @@ class MarketTests(unittest.TestCase):
         self.assertLess(poor.charge, poor.cost)
         self.assertAlmostEqual(poor.charge, poor.value)
 
+    def test_bids_under_the_price_can_be_turned_off(self) -> None:
+        """Without `under_price`, a bid under the price is no offer: a job that never
+        covers a price waits outside, unless aging can lift it over the price."""
+        jobs = [
+            Job("poor", 0, 1, 60, {"corona": 0.5}),
+            Job("mixed", 0, 1, 60, {"corona": 0.5, "tuolumne": 1.0}),
+        ]
+        runs = {}
+        for key, options in (
+            ("on", {}),
+            ("off", {"under_price": False}),
+            ("aged", {"under_price": False, "aging": 0.01}),
+            ("capped", {"under_price": False, "aging": 0.01, "aging_cap": 0.01}),
+        ):
+            with tempfile.TemporaryDirectory() as directory:
+                platforms = federation(
+                    Path(directory), share=0.1, names=("corona", "tuolumne")
+                )
+                runs[key] = run(jobs, platforms, Vcg(), **options)
+        placed = {
+            key: {row.job_id: (row.platform, row.begin_s) for row in result.routed}
+            for key, result in runs.items()
+        }
+        # Corona's price is 1.5 a node-hour: poor's 0.5 is under it, so it wins
+        # Corona's free nodes only while such bids count. Mixed covers Tuolumne's.
+        self.assertEqual(
+            placed["on"], {"poor": ("corona", 0), "mixed": ("tuolumne", 0)}
+        )
+        self.assertEqual(placed["off"], {"mixed": ("tuolumne", 0)})
+        self.assertEqual(
+            [(row.job_id, row.reason) for row in runs["off"].waiting],
+            [("poor", "under_price")],
+        )
+        # Twenty minutes of credit at 0.01 lift poor's bid to 1.7; a cap of 0.01 cannot.
+        self.assertEqual(placed["aged"]["poor"], ("corona", 1200))
+        self.assertEqual(placed["capped"], placed["off"])
+        self.assertIs(runs["off"].configuration["under_price"], False)
+
     def test_aging_lets_a_long_wait_outbid_a_newcomer(self) -> None:
         """Ten minutes waited raise a bid, and the federation pays the credit."""
         jobs = [

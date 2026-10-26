@@ -8,8 +8,9 @@ window. Step 4 (`04_offers.md`) looks inside one window; the overview of all ste
 
 Code: `run` and `_auction` in `market.py`, with the window length (`window_s`, 30 s by
 default), the number of jobs an auction takes (`prefix`, 32), the most jobs a window
-reaches among those that can be placed (`max_prefix`, 256), and aging (`aging` and
-`aging_cap`, off by default).
+reaches among those that can be placed (`max_prefix`, 256), aging (`aging` and
+`aging_cap`, off by default), and whether bids under the price count (`under_price`, on
+by default).
 
 ## 5.1 The loop
 
@@ -18,7 +19,8 @@ reaches among those that can be placed (`max_prefix`, 256), and aging (`aging` a
 2. **Intake.** Every job is checked once against the federation with every node free
    (`_blocked_by`). A job that could never run, or that bid on no machine that could
    run it, waits outside the auction for the whole run, with its reason: `hardware`,
-   `oversize` or `no_bid`.
+   `oversize` or `no_bid`. Without `under_price`, a job whose bids could never cover a
+   price, even with all the credit aging can give it, waits too, as `under_price`.
 3. **Each window**, at `t = 0, 30, 60, ...`:
    1. Advance every platform to `t`, so jobs that ended release their nodes.
    2. Admit the arrivals with `submit <= t` to the end of the queue.
@@ -106,7 +108,22 @@ Nothing in the fixture waits 10 minutes, so aging changes nothing there.
 minutes earns a credit of 0.15, outbids a newcomer whose surplus is 0.1, and pays 0.25
 of a 0.4 charge.
 
-## 5.4 What follows
+## 5.4 Bids under the price
+
+By default a bid under a platform's price is an offer there (step 4): such a job wins
+only the nodes the auctions leave free, and pays its whole bid. The market keeps no
+job waiting while it has an offer on free nodes, so those nodes are sold at once rather
+than kept for a higher bid in the next window. That favors utilization over revenue.
+
+Without `under_price` (`run --no-under-price`), each window drops every bid under a
+platform's price before the auction, after aging adds its credit. A bid under the price
+is then no offer: nodes nobody else wants stay free for the next window, and a job that
+bid under every price it could meet waits until aging lifts a bid over a price, or for
+the whole run (`under_price` in `waiting.csv`). The rule holds for every mechanism that
+reads bids; FirstFit ignores bids and is unchanged.
+`test_bids_under_the_price_can_be_turned_off` runs each case.
+
+## 5.5 What follows
 
 - **Most waiting is the window.** A job that arrives when its platforms have room still
   waits for the next window, half a window on average. With a lightly loaded federation
@@ -119,7 +136,7 @@ of a 0.4 charge.
 - **A job without a candidate does not block the queue.** It keeps its place, and the
   jobs behind it are auctioned in the meantime.
 
-## 5.5 Modelling choices
+## 5.6 Modelling choices
 
 These choices are open to revision:
 
